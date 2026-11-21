@@ -22,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
@@ -29,6 +30,7 @@ import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -58,14 +60,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.Cadence
 import com.example.data.CustomGroupEntity
+import com.example.data.EngineerEntity
 import com.example.data.MachineEntity
-import com.example.data.MachineStatus
 import com.example.data.MaintenanceTaskEntity
-import com.example.data.ServiceEntryType
 import com.example.data.Severity
 import com.example.data.SparePartDraft
 import com.example.data.WarehousePartEntity
+import com.example.data.formatEngineerList
+import com.example.data.parseEngineerList
+import com.example.ui.components.AssistantEngineersSelector
 import com.example.ui.components.DateTimePickerField
+import com.example.ui.components.EngineerPickerField
 import com.example.ui.components.StatusPill
 import com.example.ui.screens.filterWarehouseParts
 import java.util.concurrent.TimeUnit
@@ -77,6 +82,7 @@ fun TaskEditorDialog(
     defaultEngineerName: String,
     machines: List<MachineEntity>,
     groups: List<CustomGroupEntity>,
+    engineers: List<EngineerEntity>,
     onDismiss: () -> Unit,
     onDelete: ((Long) -> Unit)? = null,
     onSave: (
@@ -90,6 +96,7 @@ fun TaskEditorDialog(
         deadlineMillis: Long,
         estimatedMinutes: Int,
         personInCharge: String,
+        assistantEngineers: String,
         reminderEnabled: Boolean,
         reminderLeadHours: Int,
         lastCompletedMillis: Long?
@@ -101,15 +108,38 @@ fun TaskEditorDialog(
     var selectedGroupId by remember { mutableStateOf(initialTask?.groupId) }
     var title by remember { mutableStateOf(initialTask?.title ?: "") }
     var description by remember { mutableStateOf(initialTask?.description ?: "") }
-    var cadence by remember { mutableStateOf(initialTask?.cadence ?: Cadence.DAILY) }
+    var cadence by remember { mutableStateOf(initialTask?.cadence ?: Cadence.ONCE) }
     var deadlineMillis by remember {
         mutableStateOf(initialTask?.deadlineMillis ?: (System.currentTimeMillis() + TimeUnit.HOURS.toMillis(8)))
     }
     var estimatedMinutesText by remember { mutableStateOf((initialTask?.estimatedMinutes ?: 30).toString()) }
-    var pic by remember { mutableStateOf(initialTask?.personInCharge ?: defaultEngineerName) }
+
+    val initialPic = remember(initialTask, defaultEngineerName, engineers) {
+        val candidate = initialTask?.personInCharge ?: defaultEngineerName
+        engineers.find { it.name.equals(candidate.trim(), ignoreCase = true) }?.name
+            ?: engineers.firstOrNull()?.name
+            ?: ""
+    }
+    var pic by remember { mutableStateOf(initialPic) }
+    val selectedAssistants = remember {
+        mutableStateListOf<String>().apply {
+            addAll(
+                parseEngineerList(initialTask?.assistantEngineers.orEmpty())
+                    .filterNot { it.equals(initialPic, ignoreCase = true) }
+            )
+        }
+    }
+
+    val initialLeadHours = (initialTask?.reminderLeadHours ?: 24).coerceAtLeast(1)
+    val startsAsDays = initialLeadHours >= 24 && initialLeadHours % 24 == 0
     var reminderEnabled by remember { mutableStateOf(initialTask?.reminderEnabled ?: true) }
-    var leadHoursText by remember { mutableStateOf((initialTask?.reminderLeadHours ?: 24).toString()) }
+    var useDaysUnit by remember { mutableStateOf(startsAsDays) }
+    var leadValueText by remember {
+        mutableStateOf((if (startsAsDays) initialLeadHours / 24 else initialLeadHours).toString())
+    }
+
     var titleError by remember { mutableStateOf(false) }
+    var picError by remember { mutableStateOf(false) }
 
     var showMachineDropdown by remember { mutableStateOf(false) }
     var showGroupDropdown by remember { mutableStateOf(false) }
@@ -121,7 +151,7 @@ fun TaskEditorDialog(
             Column(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier
-                    .heightIn(max = 460.dp)
+                    .heightIn(max = 480.dp)
                     .verticalScroll(rememberScrollState())
             ) {
                 // Machine Picker
@@ -212,7 +242,7 @@ fun TaskEditorDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                Text("Cadence", style = MaterialTheme.typography.labelLarge)
+                Text("Repeat / Cadence", style = MaterialTheme.typography.labelLarge)
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.horizontalScroll(rememberScrollState())
@@ -226,6 +256,13 @@ fun TaskEditorDialog(
                         )
                     }
                 }
+                if (cadence != Cadence.ONCE) {
+                    Text(
+                        text = "Repeatable: Auto-recreates with its reminder for the next ${cadence.label.lowercase()} cycle after completion.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
 
                 DateTimePickerField(
                     label = "Service Deadline",
@@ -233,49 +270,99 @@ fun TaskEditorDialog(
                     onChange = { deadlineMillis = it }
                 )
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = pic,
-                        onValueChange = { pic = it },
-                        label = { Text("Person In Charge") },
-                        singleLine = true,
-                        modifier = Modifier
-                            .weight(1.3f)
-                            .testTag("task_pic_input")
-                    )
-                    OutlinedTextField(
-                        value = estimatedMinutesText,
-                        onValueChange = { estimatedMinutesText = it.filter { c -> c.isDigit() } },
-                        label = { Text("Est. Min") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        modifier = Modifier.weight(0.7f)
+                EngineerPickerField(
+                    label = "Person In Charge (PIC) *",
+                    selectedName = pic,
+                    engineers = engineers,
+                    onSelect = { chosen ->
+                        pic = chosen
+                        picError = false
+                        selectedAssistants.removeAll { it.equals(chosen, ignoreCase = true) }
+                    },
+                    testTag = "task_pic_picker"
+                )
+                if (picError) {
+                    Text(
+                        text = if (engineers.isEmpty()) {
+                            "No engineers registered. Add an engineer in the Engineers tab first."
+                        } else {
+                            "Please select a Person In Charge from registered engineers."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
                     )
                 }
+
+                AssistantEngineersSelector(
+                    selectedAssistants = selectedAssistants,
+                    excludePic = pic,
+                    engineers = engineers,
+                    onToggleAssistant = { name ->
+                        if (selectedAssistants.any { it.equals(name, ignoreCase = true) }) {
+                            selectedAssistants.removeAll { it.equals(name, ignoreCase = true) }
+                        } else {
+                            selectedAssistants.add(name)
+                        }
+                    }
+                )
+
+                OutlinedTextField(
+                    value = estimatedMinutesText,
+                    onValueChange = { estimatedMinutesText = it.filter { c -> c.isDigit() } },
+                    label = { Text("Estimated Duration (minutes)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Enable Reminder Alert", style = MaterialTheme.typography.bodyMedium)
+                        Text("Enable Deadline Reminder", style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "Notify before deadline & when overdue",
+                            "Notify before deadline (in hours or days) & when overdue",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Switch(checked = reminderEnabled, onCheckedChange = { reminderEnabled = it })
+                    Switch(
+                        checked = reminderEnabled,
+                        onCheckedChange = { reminderEnabled = it },
+                        modifier = Modifier.testTag("task_reminder_switch")
+                    )
                 }
 
                 if (reminderEnabled) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        FilterChip(
+                            selected = !useDaysUnit,
+                            onClick = { useDaysUnit = false },
+                            label = { Text("Hours Before") },
+                            modifier = Modifier.testTag("reminder_unit_hours")
+                        )
+                        FilterChip(
+                            selected = useDaysUnit,
+                            onClick = { useDaysUnit = true },
+                            label = { Text("Days Before") },
+                            modifier = Modifier.testTag("reminder_unit_days")
+                        )
+                    }
                     OutlinedTextField(
-                        value = leadHoursText,
-                        onValueChange = { leadHoursText = it.filter { c -> c.isDigit() } },
-                        label = { Text("Remind Hours Before Deadline") },
+                        value = leadValueText,
+                        onValueChange = { leadValueText = it.filter { c -> c.isDigit() } },
+                        label = {
+                            Text(if (useDaysUnit) "Remind Days Before Deadline" else "Remind Hours Before Deadline")
+                        },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("task_reminder_lead_input")
                     )
                 }
 
@@ -298,7 +385,14 @@ fun TaskEditorDialog(
                         titleError = true
                         return@Button
                     }
+                    val validPic = engineers.find { it.name.equals(pic.trim(), ignoreCase = true) }?.name
+                    if (validPic == null) {
+                        picError = true
+                        return@Button
+                    }
                     if (selectedMachineId == 0L) return@Button
+                    val rawLead = (leadValueText.toIntOrNull() ?: 1).coerceAtLeast(1)
+                    val computedLeadHours = if (useDaysUnit) rawLead * 24 else rawLead
                     onSave(
                         initialTask?.id ?: 0L,
                         initialTask?.uuid,
@@ -309,9 +403,10 @@ fun TaskEditorDialog(
                         cadence,
                         deadlineMillis,
                         estimatedMinutesText.toIntOrNull() ?: 30,
-                        pic.ifBlank { defaultEngineerName },
+                        validPic,
+                        formatEngineerList(selectedAssistants, validPic),
                         reminderEnabled,
-                        leadHoursText.toIntOrNull() ?: 24,
+                        computedLeadHours,
                         initialTask?.lastCompletedMillis
                     )
                 },
@@ -330,10 +425,12 @@ fun TaskEditorDialog(
 fun CompleteTaskDialog(
     task: MaintenanceTaskEntity,
     machineName: String,
+    engineers: List<EngineerEntity>,
     warehouseCatalog: List<WarehousePartEntity> = emptyList(),
     onDismiss: () -> Unit,
     onSubmit: (
         personInCharge: String,
+        assistantEngineers: List<String>,
         actualDurationMinutes: Int,
         notes: String,
         spareParts: List<SparePartDraft>,
@@ -341,21 +438,35 @@ fun CompleteTaskDialog(
         malfunctionSeverity: Severity
     ) -> Unit
 ) {
-    var pic by remember { mutableStateOf(task.personInCharge) }
+    val initialPic = remember(task, engineers) {
+        engineers.find { it.name.equals(task.personInCharge.trim(), ignoreCase = true) }?.name
+            ?: engineers.firstOrNull()?.name
+            ?: ""
+    }
+    var pic by remember { mutableStateOf(initialPic) }
+    val selectedAssistants = remember {
+        mutableStateListOf<String>().apply {
+            addAll(
+                parseEngineerList(task.assistantEngineers)
+                    .filterNot { it.equals(initialPic, ignoreCase = true) }
+            )
+        }
+    }
     var durationText by remember { mutableStateOf(task.estimatedMinutes.toString()) }
     var notes by remember { mutableStateOf("") }
     var flagMalfunction by remember { mutableStateOf(false) }
     var severity by remember { mutableStateOf(Severity.MEDIUM) }
+    var picError by remember { mutableStateOf(false) }
     val spareParts = remember { mutableStateListOf<SparePartDraft>() }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Complete & Log Service") },
+        title = { Text("Complete Task & Generate Report") },
         text = {
             Column(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier
-                    .heightIn(max = 460.dp)
+                    .heightIn(max = 480.dp)
                     .verticalScroll(rememberScrollState())
             ) {
                 Text(
@@ -364,25 +475,48 @@ fun CompleteTaskDialog(
                     color = MaterialTheme.colorScheme.primary
                 )
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = pic,
-                        onValueChange = { pic = it },
-                        label = { Text("Serviced By (PIC)") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1.2f)
-                    )
-                    OutlinedTextField(
-                        value = durationText,
-                        onValueChange = { durationText = it.filter { c -> c.isDigit() } },
-                        label = { Text("Time (min)") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        modifier = Modifier
-                            .weight(0.8f)
-                            .testTag("complete_task_duration_input")
+                EngineerPickerField(
+                    label = "Serviced By (PIC) *",
+                    selectedName = pic,
+                    engineers = engineers,
+                    onSelect = { chosen ->
+                        pic = chosen
+                        picError = false
+                        selectedAssistants.removeAll { it.equals(chosen, ignoreCase = true) }
+                    },
+                    testTag = "complete_task_pic_picker"
+                )
+                if (picError) {
+                    Text(
+                        text = "Please select a registered engineer.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
                     )
                 }
+
+                AssistantEngineersSelector(
+                    selectedAssistants = selectedAssistants,
+                    excludePic = pic,
+                    engineers = engineers,
+                    onToggleAssistant = { name ->
+                        if (selectedAssistants.any { it.equals(name, ignoreCase = true) }) {
+                            selectedAssistants.removeAll { it.equals(name, ignoreCase = true) }
+                        } else {
+                            selectedAssistants.add(name)
+                        }
+                    }
+                )
+
+                OutlinedTextField(
+                    value = durationText,
+                    onValueChange = { durationText = it.filter { c -> c.isDigit() } },
+                    label = { Text("Actual Time (minutes)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("complete_task_duration_input")
+                )
 
                 OutlinedTextField(
                     value = notes,
@@ -423,13 +557,27 @@ fun CompleteTaskDialog(
                     spareParts = spareParts,
                     warehouseCatalog = warehouseCatalog
                 )
+
+                if (task.cadence != Cadence.ONCE) {
+                    Text(
+                        text = "Note: Because cadence is ${task.cadence.label}, the next cycle task & reminder will be created automatically.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
+                    val validPic = engineers.find { it.name.equals(pic.trim(), ignoreCase = true) }?.name
+                    if (validPic == null) {
+                        picError = true
+                        return@Button
+                    }
                     onSubmit(
-                        pic.ifBlank { task.personInCharge },
+                        validPic,
+                        selectedAssistants.filterNot { it.equals(validPic, ignoreCase = true) },
                         durationText.toIntOrNull() ?: task.estimatedMinutes,
                         notes,
                         spareParts.toList(),
@@ -439,7 +587,7 @@ fun CompleteTaskDialog(
                 },
                 modifier = Modifier.testTag("confirm_complete_task_button")
             ) {
-                Text("Log & Advance Cycle")
+                Text("Complete & Save Report")
             }
         },
         dismissButton = {
@@ -449,39 +597,47 @@ fun CompleteTaskDialog(
 }
 
 @Composable
-fun MalfunctionLogDialog(
-    machines: List<MachineEntity>,
-    defaultMachineId: Long?,
-    defaultEngineerName: String,
-    warehouseCatalog: List<WarehousePartEntity> = emptyList(),
+fun RejectTaskDialog(
+    task: MaintenanceTaskEntity,
+    machineName: String,
+    engineers: List<EngineerEntity>,
     onDismiss: () -> Unit,
     onSubmit: (
-        machineId: Long,
-        entryType: ServiceEntryType,
-        summaryTitle: String,
-        details: String,
-        severity: Severity,
         personInCharge: String,
-        durationMinutes: Int,
-        spareParts: List<SparePartDraft>,
-        newMachineStatus: MachineStatus?
+        assistantEngineers: List<String>,
+        rejectionReason: String,
+        rescheduleNextCycle: Boolean
     ) -> Unit
 ) {
-    var selectedMachineId by remember { mutableStateOf(defaultMachineId ?: machines.firstOrNull()?.id ?: 0L) }
-    var entryType by remember { mutableStateOf(ServiceEntryType.MALFUNCTION_REPAIR) }
-    var summaryTitle by remember { mutableStateOf("") }
-    var details by remember { mutableStateOf("") }
-    var severity by remember { mutableStateOf(Severity.HIGH) }
-    var pic by remember { mutableStateOf(defaultEngineerName) }
-    var durationText by remember { mutableStateOf("45") }
-    var machineStatusAfter by remember { mutableStateOf<MachineStatus?>(MachineStatus.OPERATIONAL) }
-    var titleError by remember { mutableStateOf(false) }
-    var showMachineDropdown by remember { mutableStateOf(false) }
-    val spareParts = remember { mutableStateListOf<SparePartDraft>() }
+    val initialPic = remember(task, engineers) {
+        engineers.find { it.name.equals(task.personInCharge.trim(), ignoreCase = true) }?.name
+            ?: engineers.firstOrNull()?.name
+            ?: ""
+    }
+    var pic by remember { mutableStateOf(initialPic) }
+    val selectedAssistants = remember {
+        mutableStateListOf<String>().apply {
+            addAll(
+                parseEngineerList(task.assistantEngineers)
+                    .filterNot { it.equals(initialPic, ignoreCase = true) }
+            )
+        }
+    }
+    var rejectionReason by remember { mutableStateOf("") }
+    var rescheduleNextCycle by remember { mutableStateOf(false) }
+    var reasonError by remember { mutableStateOf(false) }
+    var picError by remember { mutableStateOf(false) }
+
+    val quickReasons = listOf(
+        "Machine In Production",
+        "Awaiting Spare Parts",
+        "Unsafe / Locked Out",
+        "Duplicate Request"
+    )
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Log Malfunction / Service") },
+        title = { Text("Reject Service Task") },
         text = {
             Column(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -489,136 +645,132 @@ fun MalfunctionLogDialog(
                     .heightIn(max = 460.dp)
                     .verticalScroll(rememberScrollState())
             ) {
-                Box {
-                    val m = machines.find { it.id == selectedMachineId }
-                    OutlinedButton(
-                        onClick = { showMachineDropdown = true },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .minimumInteractiveComponentSize()
-                    ) {
-                        Text(m?.let { "${it.assetCode} · ${it.name}" } ?: "Select Machine", modifier = Modifier.weight(1f))
-                        Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
-                    }
-                    DropdownMenu(expanded = showMachineDropdown, onDismissRequest = { showMachineDropdown = false }) {
-                        machines.forEach { machine ->
-                            DropdownMenuItem(
-                                text = { Text("${machine.assetCode} · ${machine.name}") },
-                                onClick = {
-                                    selectedMachineId = machine.id
-                                    showMachineDropdown = false
-                                }
-                            )
+                Text(
+                    text = "${task.title} ($machineName)",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+                Text(
+                    text = "Rejecting moves this task to Machine History & Reports as Rejected.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                EngineerPickerField(
+                    label = "Reviewed / Rejected By (PIC) *",
+                    selectedName = pic,
+                    engineers = engineers,
+                    onSelect = { chosen ->
+                        pic = chosen
+                        picError = false
+                        selectedAssistants.removeAll { it.equals(chosen, ignoreCase = true) }
+                    },
+                    testTag = "reject_task_pic_picker"
+                )
+                if (picError) {
+                    Text(
+                        text = "Please select a registered engineer.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+
+                AssistantEngineersSelector(
+                    selectedAssistants = selectedAssistants,
+                    excludePic = pic,
+                    engineers = engineers,
+                    onToggleAssistant = { name ->
+                        if (selectedAssistants.any { it.equals(name, ignoreCase = true) }) {
+                            selectedAssistants.removeAll { it.equals(name, ignoreCase = true) }
+                        } else {
+                            selectedAssistants.add(name)
                         }
                     }
-                }
+                )
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ServiceEntryType.entries.forEach { type ->
+                Text("Quick Reason", style = MaterialTheme.typography.labelLarge)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                ) {
+                    quickReasons.forEach { preset ->
                         FilterChip(
-                            selected = entryType == type,
-                            onClick = { entryType = type },
-                            label = {
-                                Text(if (type == ServiceEntryType.MALFUNCTION_REPAIR) "Malfunction" else "Service")
-                            }
+                            selected = rejectionReason == preset,
+                            onClick = {
+                                rejectionReason = preset
+                                reasonError = false
+                            },
+                            label = { Text(preset) }
                         )
                     }
                 }
 
                 OutlinedTextField(
-                    value = summaryTitle,
+                    value = rejectionReason,
                     onValueChange = {
-                        summaryTitle = it
-                        titleError = false
+                        rejectionReason = it
+                        reasonError = false
                     },
-                    label = { Text("Malfunction / Service Summary *") },
-                    isError = titleError,
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("malfunction_summary_input")
-                )
-
-                OutlinedTextField(
-                    value = details,
-                    onValueChange = { details = it },
-                    label = { Text("Symptom, Root Cause & Repair Action") },
+                    label = { Text("Rejection Reason *") },
+                    isError = reasonError,
+                    supportingText = if (reasonError) { { Text("Enter why this service cannot be performed") } } else null,
                     minLines = 2,
                     maxLines = 4,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("reject_task_reason_input")
                 )
 
-                Text("Severity", style = MaterialTheme.typography.labelLarge)
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.horizontalScroll(rememberScrollState())
-                ) {
-                    Severity.entries.forEach { sev ->
-                        FilterChip(selected = severity == sev, onClick = { severity = sev }, label = { Text(sev.label) })
-                    }
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = pic,
-                        onValueChange = { pic = it },
-                        label = { Text("Person In Charge") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1.2f)
-                    )
-                    OutlinedTextField(
-                        value = durationText,
-                        onValueChange = { durationText = it.filter { c -> c.isDigit() } },
-                        label = { Text("Service Min") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        modifier = Modifier.weight(0.8f)
-                    )
-                }
-
-                Text("Machine Status After Log", style = MaterialTheme.typography.labelLarge)
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.horizontalScroll(rememberScrollState())
-                ) {
-                    MachineStatus.entries.forEach { st ->
-                        FilterChip(
-                            selected = machineStatusAfter == st,
-                            onClick = { machineStatusAfter = if (machineStatusAfter == st) null else st },
-                            label = { Text(st.label) }
+                if (task.cadence != Cadence.ONCE) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Recreate next ${task.cadence.label.lowercase()} cycle", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "Skip current window and schedule the next occurrence",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = rescheduleNextCycle,
+                            onCheckedChange = { rescheduleNextCycle = it },
+                            modifier = Modifier.testTag("reject_reschedule_switch")
                         )
                     }
                 }
-
-                SparePartsEditorSection(
-                    spareParts = spareParts,
-                    warehouseCatalog = warehouseCatalog
-                )
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    if (summaryTitle.isBlank()) {
-                        titleError = true
+                    val validPic = engineers.find { it.name.equals(pic.trim(), ignoreCase = true) }?.name
+                    if (validPic == null) {
+                        picError = true
                         return@Button
                     }
-                    if (selectedMachineId == 0L) return@Button
+                    if (rejectionReason.isBlank()) {
+                        reasonError = true
+                        return@Button
+                    }
                     onSubmit(
-                        selectedMachineId,
-                        entryType,
-                        summaryTitle,
-                        details,
-                        severity,
-                        pic.ifBlank { defaultEngineerName },
-                        durationText.toIntOrNull() ?: 30,
-                        spareParts.toList(),
-                        machineStatusAfter
+                        validPic,
+                        selectedAssistants.filterNot { it.equals(validPic, ignoreCase = true) },
+                        rejectionReason.trim(),
+                        rescheduleNextCycle
                     )
                 },
-                modifier = Modifier.testTag("save_malfunction_button")
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError
+                ),
+                modifier = Modifier.testTag("confirm_reject_task_button")
             ) {
-                Text("Save Report")
+                Icon(Icons.Filled.Block, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Reject & Record")
             }
         },
         dismissButton = {

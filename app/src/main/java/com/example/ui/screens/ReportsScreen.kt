@@ -19,9 +19,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Person
@@ -29,7 +32,6 @@ import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.PrecisionManufacturing
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.TableView
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -57,6 +59,7 @@ import com.example.data.Cadence
 import com.example.data.MachineEntity
 import com.example.data.ServiceEntryType
 import com.example.data.ServiceLogWithParts
+import com.example.data.TaskOutcome
 import com.example.engine.ExportFilterParams
 import com.example.engine.Formatters
 import com.example.engine.ReportExportEngine
@@ -66,6 +69,7 @@ import com.example.ui.components.EmptyStateCard
 import com.example.ui.components.KpiMetricCard
 import com.example.ui.components.SeverityPill
 import com.example.ui.components.StatusPill
+import com.example.ui.components.TaskOutcomePill
 import com.example.ui.theme.LocalMachinaColors
 import java.util.concurrent.TimeUnit
 
@@ -100,8 +104,8 @@ fun ReportsScreen(
     }
 
     val totalLogs = dataset.logs.size
-    val malfunctions = dataset.logs.count { it.log.entryType == ServiceEntryType.MALFUNCTION_REPAIR }
-    val totalMinutes = dataset.logs.sumOf { it.log.serviceDurationMinutes }
+    val doneCount = dataset.logs.count { it.log.outcome == TaskOutcome.DONE }
+    val rejectedCount = dataset.logs.count { it.log.outcome == TaskOutcome.REJECTED }
     val totalPartsQty = dataset.logs.sumOf { item -> item.parts.sumOf { it.quantity } }
 
     var showMachineMenu by remember { mutableStateOf(false) }
@@ -127,11 +131,11 @@ fun ReportsScreen(
                     modifier = Modifier.padding(14.dp)
                 ) {
                     Text(
-                        text = "Historical Report & Parameterized Export",
+                        text = "Automated Machine Reports & Export",
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text(
-                        text = "Filter by machine, person in charge, custom group, cadence, or time period below, then export directly to Excel (.xlsx) or PDF.",
+                        text = "Reports are auto-generated whenever tasks are completed or rejected. Filter below and export to Excel (.xlsx) or PDF.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -173,19 +177,19 @@ fun ReportsScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    KpiMetricCard("Service Logs", "$totalLogs", Icons.Filled.History, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
-                    KpiMetricCard("Malfunctions", "$malfunctions", Icons.Filled.Warning, sem.critical, Modifier.weight(1f))
-                    KpiMetricCard("Service Time", Formatters.formatDuration(totalMinutes), Icons.Filled.Schedule, sem.info, Modifier.weight(1f))
+                    KpiMetricCard("Total Reports", "$totalLogs", Icons.Filled.History, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
+                    KpiMetricCard("Done", "$doneCount", Icons.Filled.CheckCircle, sem.operational, Modifier.weight(1f))
+                    KpiMetricCard("Rejected", "$rejectedCount", Icons.Filled.Block, sem.critical, Modifier.weight(1f))
                     KpiMetricCard("Parts Used", "$totalPartsQty", Icons.Filled.Inventory2, sem.warning, Modifier.weight(1f))
                 }
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                        KpiMetricCard("Service Logs", "$totalLogs", Icons.Filled.History, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
-                        KpiMetricCard("Malfunctions", "$malfunctions", Icons.Filled.Warning, sem.critical, Modifier.weight(1f))
+                        KpiMetricCard("Total Reports", "$totalLogs", Icons.Filled.History, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
+                        KpiMetricCard("Done", "$doneCount", Icons.Filled.CheckCircle, sem.operational, Modifier.weight(1f))
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                        KpiMetricCard("Service Time", Formatters.formatDuration(totalMinutes), Icons.Filled.Schedule, sem.info, Modifier.weight(1f))
+                        KpiMetricCard("Rejected", "$rejectedCount", Icons.Filled.Block, sem.critical, Modifier.weight(1f))
                         KpiMetricCard("Parts Used", "$totalPartsQty", Icons.Filled.Inventory2, sem.warning, Modifier.weight(1f))
                     }
                 }
@@ -338,13 +342,31 @@ fun ReportsScreen(
                     }
                 }
 
-                // Cadence Filter Chips
+                // Outcome & Cadence Chips
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState())
                 ) {
+                    FilterChip(
+                        selected = params.outcome == null,
+                        onClick = { onUpdateReportFilter { it.copy(outcome = null) } },
+                        label = { Text("All Outcomes") },
+                        modifier = Modifier.testTag("report_outcome_all")
+                    )
+                    TaskOutcome.entries.forEach { out ->
+                        FilterChip(
+                            selected = params.outcome == out,
+                            onClick = {
+                                onUpdateReportFilter {
+                                    it.copy(outcome = if (it.outcome == out) null else out)
+                                }
+                            },
+                            label = { Text(out.label) },
+                            modifier = Modifier.testTag("report_outcome_${out.name.lowercase()}")
+                        )
+                    }
                     FilterChip(
                         selected = params.cadence == null,
                         onClick = { onUpdateReportFilter { it.copy(cadence = null) } },
@@ -398,13 +420,14 @@ private fun ServiceHistoryReportCard(
 ) {
     val log = item.log
     val sem = LocalMachinaColors.current
+    val isRejected = log.outcome == TaskOutcome.REJECTED
     val isMalfunction = log.entryType == ServiceEntryType.MALFUNCTION_REPAIR
 
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(
             width = 1.dp,
-            color = if (isMalfunction) sem.critical.copy(alpha = 0.35f) else MaterialTheme.colorScheme.outlineVariant
+            color = if (isRejected || isMalfunction) sem.critical.copy(alpha = 0.4f) else MaterialTheme.colorScheme.outlineVariant
         ),
         shape = RoundedCornerShape(14.dp),
         modifier = Modifier
@@ -420,12 +443,11 @@ private fun ServiceHistoryReportCard(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                StatusPill(
-                    text = if (isMalfunction) "MALFUNCTION" else "PREVENTIVE",
-                    containerColor = if (isMalfunction) sem.criticalContainer else sem.operationalContainer,
-                    contentColor = if (isMalfunction) sem.critical else sem.operational
-                )
-                SeverityPill(log.severity)
+                TaskOutcomePill(log.outcome)
+                if (isMalfunction && !isRejected) {
+                    StatusPill("MALFUNCTION", sem.criticalContainer, sem.critical)
+                    SeverityPill(log.severity)
+                }
                 log.cadenceSnapshot?.let { CadencePill(it) }
                 Spacer(Modifier.weight(1f))
                 IconButton(onClick = onDelete, modifier = Modifier.testTag("delete_log_${log.id}")) {
@@ -448,7 +470,20 @@ private fun ServiceHistoryReportCard(
                 )
             }
 
-            if (log.malfunctionDetails.isNotBlank()) {
+            if (isRejected && log.rejectionReason.isNotBlank()) {
+                Surface(
+                    color = sem.criticalContainer.copy(alpha = 0.55f),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Rejection Reason: ${log.rejectionReason}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = sem.critical,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                }
+            } else if (log.malfunctionDetails.isNotBlank()) {
                 Text(
                     text = log.malfunctionDetails,
                     style = MaterialTheme.typography.bodySmall,
@@ -471,16 +506,29 @@ private fun ServiceHistoryReportCard(
                     Spacer(Modifier.width(3.dp))
                     Text(log.personInCharge, style = MaterialTheme.typography.labelSmall)
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Build, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.width(3.dp))
-                    Text(Formatters.formatDuration(log.serviceDurationMinutes), style = MaterialTheme.typography.labelSmall)
+                if (log.assistantEngineers.isNotBlank()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Groups, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(3.dp))
+                        Text(
+                            text = "+ ${log.assistantEngineers}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
-                StatusPill(
-                    text = if (log.deadlineWasMet) "On Time" else "Late",
-                    containerColor = if (log.deadlineWasMet) sem.operationalContainer else sem.warningContainer,
-                    contentColor = if (log.deadlineWasMet) sem.operational else sem.warning
-                )
+                if (!isRejected) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Build, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.width(3.dp))
+                        Text(Formatters.formatDuration(log.serviceDurationMinutes), style = MaterialTheme.typography.labelSmall)
+                    }
+                    StatusPill(
+                        text = if (log.deadlineWasMet) "On Time" else "Late",
+                        containerColor = if (log.deadlineWasMet) sem.operationalContainer else sem.warningContainer,
+                        contentColor = if (log.deadlineWasMet) sem.operational else sem.warning
+                    )
+                }
             }
 
             if (item.parts.isNotEmpty()) {

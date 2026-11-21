@@ -12,6 +12,7 @@ import com.example.data.MachineEntity
 import com.example.data.MaintenanceTaskEntity
 import com.example.data.ServiceEntryType
 import com.example.data.ServiceLogWithParts
+import com.example.data.TaskOutcome
 import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStream
@@ -26,6 +27,7 @@ data class ExportFilterParams(
     val personInCharge: String? = null,
     val cadence: Cadence? = null,
     val entryType: ServiceEntryType? = null,
+    val outcome: TaskOutcome? = null,
     val startMillis: Long? = null,
     val endMillis: Long? = null
 )
@@ -74,9 +76,10 @@ object ReportExportEngine {
                     log.personInCharge.equals(params.personInCharge, ignoreCase = true)
                 val matchesCadence = params.cadence == null || log.cadenceSnapshot == params.cadence
                 val matchesType = params.entryType == null || log.entryType == params.entryType
+                val matchesOutcome = params.outcome == null || log.outcome == params.outcome
                 val matchesStart = params.startMillis == null || log.completedAtMillis >= params.startMillis
                 val matchesEnd = params.endMillis == null || log.completedAtMillis <= params.endMillis
-                matchesMachine && matchesGroup && matchesPic && matchesCadence && matchesType && matchesStart && matchesEnd
+                matchesMachine && matchesGroup && matchesPic && matchesCadence && matchesType && matchesOutcome && matchesStart && matchesEnd
             }
         }
 
@@ -110,6 +113,8 @@ object ReportExportEngine {
     fun writeXlsx(out: OutputStream, params: ExportFilterParams, dataset: ExportDataset) {
         val now = System.currentTimeMillis()
         val totalMinutes = dataset.logs.sumOf { it.log.serviceDurationMinutes }
+        val doneCount = dataset.logs.count { it.log.outcome == TaskOutcome.DONE }
+        val rejectedCount = dataset.logs.count { it.log.outcome == TaskOutcome.REJECTED }
         val malfunctionsCount = dataset.logs.count { it.log.entryType == ServiceEntryType.MALFUNCTION_REPAIR }
         val totalPartsQty = dataset.logs.sumOf { item -> item.parts.sumOf { it.quantity } }
 
@@ -120,14 +125,16 @@ object ReportExportEngine {
             listOf(CellValue.Text("Group Filter"), CellValue.Text(params.customGroupId?.let { dataset.groupsById[it]?.name } ?: "All Groups")),
             listOf(CellValue.Text("Person In Charge"), CellValue.Text(params.personInCharge?.takeIf { it.isNotBlank() } ?: "All Engineers")),
             listOf(CellValue.Text("Cadence Filter"), CellValue.Text(params.cadence?.label ?: "All Cadences")),
+            listOf(CellValue.Text("Outcome Filter"), CellValue.Text(params.outcome?.label ?: "All Outcomes (Done & Rejected)")),
             listOf(CellValue.Text("Entry Type"), CellValue.Text(params.entryType?.label ?: "All Types")),
             listOf(CellValue.Text("Period Start"), CellValue.Text(params.startMillis?.let { Formatters.formatDateOnly(it) } ?: "Beginning")),
             listOf(CellValue.Text("Period End"), CellValue.Text(params.endMillis?.let { Formatters.formatDateOnly(it) } ?: "Present")),
-            listOf(CellValue.Text(""), CellValue.Text("")),
             listOf(CellValue.Text("KPI Metric"), CellValue.Text("Value")),
-            listOf(CellValue.Text("Scheduled Tasks Matched"), CellValue.Num(dataset.tasks.size.toDouble())),
-            listOf(CellValue.Text("Service & Malfunction Logs Matched"), CellValue.Num(dataset.logs.size.toDouble())),
-            listOf(CellValue.Text("Malfunctions Recorded"), CellValue.Num(malfunctionsCount.toDouble())),
+            listOf(CellValue.Text("Active Scheduled Tasks Matched"), CellValue.Num(dataset.tasks.size.toDouble())),
+            listOf(CellValue.Text("Machine Reports Matched"), CellValue.Num(dataset.logs.size.toDouble())),
+            listOf(CellValue.Text("Tasks Completed (Done)"), CellValue.Num(doneCount.toDouble())),
+            listOf(CellValue.Text("Tasks Rejected"), CellValue.Num(rejectedCount.toDouble())),
+            listOf(CellValue.Text("Malfunctions Flagged on Tasks"), CellValue.Num(malfunctionsCount.toDouble())),
             listOf(CellValue.Text("Total Service Time (Minutes)"), CellValue.Num(totalMinutes.toDouble())),
             listOf(CellValue.Text("Total Spare Parts Quantity"), CellValue.Num(totalPartsQty.toDouble()))
         )
@@ -142,6 +149,7 @@ object ReportExportEngine {
                 CellValue.Text("Deadline"),
                 CellValue.Text("Status"),
                 CellValue.Text("Person In Charge"),
+                CellValue.Text("Assistant Engineers"),
                 CellValue.Text("Est. Minutes"),
                 CellValue.Text("Reminder")
             )
@@ -159,22 +167,25 @@ object ReportExportEngine {
                 CellValue.Text(Formatters.formatIsoDateTime(t.deadlineMillis)),
                 CellValue.Text(status),
                 CellValue.Text(t.personInCharge),
+                CellValue.Text(t.assistantEngineers.ifBlank { "-" }),
                 CellValue.Num(t.estimatedMinutes.toDouble()),
-                CellValue.Text(if (t.reminderEnabled) "On (${t.reminderLeadHours}h lead)" else "Off")
+                CellValue.Text(if (t.reminderEnabled) "On (${Formatters.formatLeadTime(t.reminderLeadHours)} before)" else "Off")
             )
         }
 
         val logRows = mutableListOf<List<CellValue>>(
             listOf(
-                CellValue.Text("Completed Date"),
+                CellValue.Text("Recorded Date"),
+                CellValue.Text("Outcome"),
                 CellValue.Text("Type"),
                 CellValue.Text("Severity"),
                 CellValue.Text("Asset Code"),
                 CellValue.Text("Machine"),
                 CellValue.Text("Custom Group"),
-                CellValue.Text("Summary"),
-                CellValue.Text("Malfunction / Service Details"),
+                CellValue.Text("Task Summary"),
+                CellValue.Text("Details / Rejection Reason"),
                 CellValue.Text("Person In Charge"),
+                CellValue.Text("Assistant Engineers"),
                 CellValue.Text("Service Time (min)"),
                 CellValue.Text("On Time"),
                 CellValue.Text("Spare Parts Used")
@@ -192,18 +203,28 @@ object ReportExportEngine {
                     "$idStr${p.partName}$descStr$srcStr x${p.quantity} ${p.unit}"
                 }
             }
+            val detailsCombined = if (l.outcome == TaskOutcome.REJECTED) {
+                listOfNotNull(
+                    l.rejectionReason.takeIf { it.isNotBlank() }?.let { "Rejected: $it" },
+                    l.malfunctionDetails.takeIf { it.isNotBlank() }
+                ).joinToString(" · ")
+            } else {
+                l.malfunctionDetails
+            }
             logRows += listOf(
                 CellValue.Text(Formatters.formatIsoDateTime(l.completedAtMillis)),
+                CellValue.Text(l.outcome.label),
                 CellValue.Text(l.entryType.label),
                 CellValue.Text(l.severity.label),
                 CellValue.Text(m?.assetCode ?: "-"),
                 CellValue.Text(m?.name ?: "Unknown"),
                 CellValue.Text(g),
                 CellValue.Text(l.summaryTitle),
-                CellValue.Text(l.malfunctionDetails),
+                CellValue.Text(detailsCombined),
                 CellValue.Text(l.personInCharge),
+                CellValue.Text(l.assistantEngineers.ifBlank { "-" }),
                 CellValue.Num(l.serviceDurationMinutes.toDouble()),
-                CellValue.Text(if (l.deadlineWasMet) "Yes" else "Late"),
+                CellValue.Text(if (l.outcome == TaskOutcome.REJECTED) "N/A" else if (l.deadlineWasMet) "Yes" else "Late"),
                 CellValue.Text(partsSummary)
             )
         }
@@ -348,16 +369,19 @@ object ReportExportEngine {
         val cadenceLabel = params.cadence?.label ?: "All Cadences"
         val periodLabel = "${params.startMillis?.let { Formatters.formatDateOnly(it) } ?: "Any"} to ${params.endMillis?.let { Formatters.formatDateOnly(it) } ?: "Present"}"
 
+        val outcomeLabel = params.outcome?.label ?: "All Outcomes"
+
         canvas.drawRect(margin, y, margin + contentWidth, y + 58f, cardFillPaint)
         y += 14f
         canvas.drawText("Filters: Machine=$machineLabel  |  Group=$groupLabel  |  PIC=$picLabel", margin + 8f, y, bodyPaint)
         y += 14f
-        canvas.drawText("Cadence=$cadenceLabel  |  Period=$periodLabel", margin + 8f, y, bodyPaint)
+        canvas.drawText("Cadence=$cadenceLabel  |  Outcome=$outcomeLabel  |  Period=$periodLabel", margin + 8f, y, bodyPaint)
         y += 14f
         val totalMin = dataset.logs.sumOf { it.log.serviceDurationMinutes }
-        val malfunctionCount = dataset.logs.count { it.log.entryType == ServiceEntryType.MALFUNCTION_REPAIR }
+        val doneCount = dataset.logs.count { it.log.outcome == TaskOutcome.DONE }
+        val rejectedCount = dataset.logs.count { it.log.outcome == TaskOutcome.REJECTED }
         canvas.drawText(
-            "KPIs: ${dataset.tasks.size} Tasks  |  ${dataset.logs.size} Logs ($malfunctionCount Malfunctions)  |  Total Service Time: ${Formatters.formatDuration(totalMin)}",
+            "KPIs: ${dataset.tasks.size} Active Tasks  |  ${dataset.logs.size} Reports ($doneCount Done, $rejectedCount Rejected)  |  Service Time: ${Formatters.formatDuration(totalMin)}",
             margin + 8f,
             y,
             boldBodyPaint
@@ -366,18 +390,19 @@ object ReportExportEngine {
 
         if (params.includeTasks) {
             ensureSpace(32f)
-            canvas.drawText("1. Scheduled Maintenance Tasks (${dataset.tasks.size})", margin, y, sectionPaint)
+            canvas.drawText("1. Active Scheduled Tasks (${dataset.tasks.size})", margin, y, sectionPaint)
             y += 8f
             canvas.drawLine(margin, y, margin + contentWidth, y, dividerPaint)
             y += 14f
             if (dataset.tasks.isEmpty()) {
-                canvas.drawText("No tasks matched the selected filter parameters.", margin, y, mutedPaint)
+                canvas.drawText("No active tasks matched the selected filter parameters.", margin, y, mutedPaint)
                 y += 18f
             } else {
                 dataset.tasks.forEach { t ->
                     ensureSpace(40f)
                     val m = dataset.machinesById[t.machineId]
                     val state = if (t.deadlineMillis < System.currentTimeMillis()) "OVERDUE" else "DUE"
+                    val asstStr = if (t.assistantEngineers.isNotBlank()) " (+ ${t.assistantEngineers})" else ""
                     canvas.drawText(
                         "[${t.cadence.label.uppercase()}] ${t.title} — ${m?.assetCode ?: ""} ${m?.name ?: ""}",
                         margin,
@@ -386,7 +411,7 @@ object ReportExportEngine {
                     )
                     y += 12f
                     canvas.drawText(
-                        "Status: $state (${Formatters.formatDateTime(t.deadlineMillis)})  |  PIC: ${t.personInCharge}  |  Est: ${Formatters.formatDuration(t.estimatedMinutes)}",
+                        "Status: $state (${Formatters.formatDateTime(t.deadlineMillis)})  |  PIC: ${t.personInCharge}$asstStr  |  Est: ${Formatters.formatDuration(t.estimatedMinutes)}",
                         margin + 8f,
                         y,
                         mutedPaint
@@ -399,32 +424,36 @@ object ReportExportEngine {
 
         if (params.includeLogs) {
             ensureSpace(32f)
-            canvas.drawText("2. Service & Malfunction History (${dataset.logs.size})", margin, y, sectionPaint)
+            canvas.drawText("2. Machine Task History & Reports (${dataset.logs.size})", margin, y, sectionPaint)
             y += 8f
             canvas.drawLine(margin, y, margin + contentWidth, y, dividerPaint)
             y += 14f
             if (dataset.logs.isEmpty()) {
-                canvas.drawText("No service or malfunction logs matched the selected filter parameters.", margin, y, mutedPaint)
+                canvas.drawText("No task reports matched the selected filter parameters.", margin, y, mutedPaint)
                 y += 18f
             } else {
                 dataset.logs.forEach { item ->
                     val l = item.log
                     val m = dataset.machinesById[l.machineId]
+                    val asstStr = if (l.assistantEngineers.isNotBlank()) " (+ ${l.assistantEngineers})" else ""
                     ensureSpace(56f)
                     canvas.drawText(
-                        "[${l.entryType.label}] ${l.summaryTitle} (${m?.assetCode ?: ""} ${m?.name ?: ""})",
+                        "[${l.outcome.label.uppercase()} · ${l.entryType.label}] ${l.summaryTitle} (${m?.assetCode ?: ""} ${m?.name ?: ""})",
                         margin,
                         y,
                         boldBodyPaint
                     )
                     y += 12f
                     canvas.drawText(
-                        "Date: ${Formatters.formatDateTime(l.completedAtMillis)}  |  PIC: ${l.personInCharge}  |  Time: ${Formatters.formatDuration(l.serviceDurationMinutes)}  |  Severity: ${l.severity.label}",
+                        "Date: ${Formatters.formatDateTime(l.completedAtMillis)}  |  PIC: ${l.personInCharge}$asstStr  |  Time: ${Formatters.formatDuration(l.serviceDurationMinutes)}",
                         margin + 8f,
                         y,
                         mutedPaint
                     )
                     y += 12f
+                    if (l.outcome == TaskOutcome.REJECTED && l.rejectionReason.isNotBlank()) {
+                        drawWrappedText("Rejection Reason: ${l.rejectionReason}", margin + 8f, contentWidth - 12f, bodyPaint)
+                    }
                     if (l.malfunctionDetails.isNotBlank()) {
                         drawWrappedText("Notes: ${l.malfunctionDetails}", margin + 8f, contentWidth - 12f, bodyPaint)
                     }

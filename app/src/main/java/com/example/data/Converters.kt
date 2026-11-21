@@ -23,4 +23,7 @@ class Converters {
 
     @TypeConverter fun fromSeverity(v: Severity): String = v.name
     @TypeConverter fun toSeverity(v: String): Severity = Severity.valueOf(v)
+
+    @TypeConverter fun fromTaskOutcome(v: TaskOutcome): String = v.name
+    @TypeConverter fun toTaskOutcome(v: String): TaskOutcome = runCatching { TaskOutcome.valueOf(v) }.getOrDefault(TaskOutcome.DONE)
 }

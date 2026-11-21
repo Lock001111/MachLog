@@ -22,6 +22,16 @@ data class WebPingResponse(
 )
 
 @JsonClass(generateAdapter = true)
+data class WebEngineerDto(
+    val id: Long,
+    val uuid: String,
+    val name: String,
+    val employeeCode: String,
+    val role: String,
+    val shift: String
+)
+
+@JsonClass(generateAdapter = true)
 data class WebStateResponse(
     val nowMillis: Long,
     val defaultEngineerName: String,
@@ -30,6 +40,7 @@ data class WebStateResponse(
     val tasks: List<WebTaskDto>,
     val todos: List<WebTodoDto>,
     val warehouseParts: List<WebWarehousePartDto>,
+    val engineers: List<WebEngineerDto>,
     val serviceLogs: List<WebServiceLogDto>
 )
 
@@ -67,6 +78,7 @@ data class WebTaskDto(
     val deadlineMillis: Long,
     val estimatedMinutes: Int,
     val personInCharge: String,
+    val assistantEngineers: String,
     val reminderEnabled: Boolean,
     val reminderLeadHours: Int,
     val lastCompletedMillis: Long?
@@ -120,7 +132,10 @@ data class WebServiceLogDto(
     val summaryTitle: String,
     val malfunctionDetails: String,
     val severity: String,
+    val outcome: String,
+    val rejectionReason: String,
     val personInCharge: String,
+    val assistantEngineers: String,
     val serviceDurationMinutes: Int,
     val completedAtMillis: Long,
     val deadlineWasMet: Boolean,
@@ -133,6 +148,15 @@ data class WebSaveGroupReq(
     val name: String,
     val scope: String = "ALL",
     val colorKey: String = "COBALT"
+)
+
+@JsonClass(generateAdapter = true)
+data class WebSaveEngineerReq(
+    val id: Long = 0,
+    val name: String,
+    val employeeCode: String = "",
+    val role: String = "Maintenance Engineer",
+    val shift: String = "Day Shift"
 )
 
 @JsonClass(generateAdapter = true)
@@ -154,10 +178,11 @@ data class WebSaveTaskReq(
     val groupId: Long? = null,
     val title: String,
     val description: String = "",
-    val cadence: String = "DAILY",
+    val cadence: String = "ONCE",
     val deadlineMillis: Long,
     val estimatedMinutes: Int = 30,
     val personInCharge: String = "",
+    val assistantEngineers: String = "",
     val reminderEnabled: Boolean = true,
     val reminderLeadHours: Int = 24
 )
@@ -175,11 +200,20 @@ data class WebSparePartDraftReq(
 @JsonClass(generateAdapter = true)
 data class WebCompleteTaskReq(
     val personInCharge: String = "",
+    val assistantEngineers: List<String> = emptyList(),
     val actualDurationMinutes: Int = 30,
     val notes: String = "",
     val flagMalfunction: Boolean = false,
     val severity: String = "MEDIUM",
     val spareParts: List<WebSparePartDraftReq> = emptyList()
+)
+
+@JsonClass(generateAdapter = true)
+data class WebRejectTaskReq(
+    val personInCharge: String = "",
+    val assistantEngineers: List<String> = emptyList(),
+    val rejectionReason: String = "",
+    val rescheduleNextCycle: Boolean = false
 )
 
 @JsonClass(generateAdapter = true)
@@ -203,19 +237,6 @@ data class WebSaveWarehousePartReq(
     val partName: String = "",
     val partDescription: String = "",
     val defaultUnit: String = "pcs"
-)
-
-@JsonClass(generateAdapter = true)
-data class WebSaveLogReq(
-    val machineId: Long,
-    val entryType: String = "MALFUNCTION_REPAIR",
-    val summaryTitle: String,
-    val details: String = "",
-    val severity: String = "HIGH",
-    val personInCharge: String = "",
-    val durationMinutes: Int = 45,
-    val newMachineStatus: String? = null,
-    val spareParts: List<WebSparePartDraftReq> = emptyList()
 )
 
 @JsonClass(generateAdapter = true)

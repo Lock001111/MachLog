@@ -11,6 +11,7 @@ import com.example.data.AppPreferences
 import com.example.data.AutoBackupFrequency
 import com.example.data.Cadence
 import com.example.data.CustomGroupEntity
+import com.example.data.EngineerEntity
 import com.example.data.GroupScope
 import com.example.data.MachineEntity
 import com.example.data.MachineStatus
@@ -18,7 +19,6 @@ import com.example.data.MaintenanceRepository
 import com.example.data.MaintenanceTaskEntity
 import com.example.data.ReminderPriority
 import com.example.data.RepeatRule
-import com.example.data.ServiceEntryType
 import com.example.data.ServiceLogWithParts
 import com.example.data.Severity
 import com.example.data.SparePartDraft
@@ -105,15 +105,12 @@ data class MachinaUiState(
     val pendingImportPreview: PortableBackupPackage? = null,
     val pendingExcelImportPreview: ExcelImportPreview? = null,
     val warehouseParts: List<WarehousePartEntity> = emptyList(),
+    val engineers: List<EngineerEntity> = emptyList(),
     val webPortalStatus: WebPortalStatus = WebPortalStatus(),
     val isBusy: Boolean = false
 ) {
     val knownEngineers: List<String>
-        get() = (tasks.map { it.personInCharge } +
-            todos.map { it.personInCharge } +
-            serviceLogs.map { it.log.personInCharge } +
-            listOf(preferences.defaultEngineerName))
-            .map { it.trim() }
+        get() = engineers.map { it.name.trim() }
             .filter { it.isNotEmpty() }
             .distinct()
             .sorted()
@@ -161,7 +158,8 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
         _pendingExcelImportPreview,
         _isBusy,
         repo.warehousePartsFlow,
-        LocalWebServerManager.status
+        LocalWebServerManager.status,
+        repo.engineersFlow
     ) { values ->
         @Suppress("UNCHECKED_CAST")
         val groups = values[0] as List<CustomGroupEntity>
@@ -187,6 +185,8 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
         @Suppress("UNCHECKED_CAST")
         val warehouseCatalog = values[15] as List<WarehousePartEntity>
         val webStatus = values[16] as WebPortalStatus
+        @Suppress("UNCHECKED_CAST")
+        val engineersList = values[17] as List<EngineerEntity>
 
         val resolvedSelectedId = if (selMachine != null && machines.any { it.id == selMachine }) {
             selMachine
@@ -210,6 +210,7 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
             pendingImportPreview = importPreview,
             pendingExcelImportPreview = excelPreview,
             warehouseParts = warehouseCatalog,
+            engineers = engineersList,
             webPortalStatus = webStatus,
             isBusy = busy
         )
@@ -347,7 +348,48 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    // --- Task CRUD & Completion ---
+    // --- Engineers CRUD ---
+    fun saveEngineer(
+        id: Long,
+        uuid: String?,
+        name: String,
+        employeeCode: String,
+        role: String,
+        shift: String
+    ) {
+        viewModelScope.launch {
+            val cleanName = name.trim()
+            if (cleanName.isEmpty()) return@launch
+            val entity = if (id == 0L || uuid == null) {
+                EngineerEntity(
+                    name = cleanName,
+                    employeeCode = employeeCode.trim().uppercase(),
+                    role = role.trim().ifEmpty { "Maintenance Engineer" },
+                    shift = shift.trim().ifEmpty { "Day Shift" }
+                )
+            } else {
+                EngineerEntity(
+                    id = id,
+                    uuid = uuid,
+                    name = cleanName,
+                    employeeCode = employeeCode.trim().uppercase(),
+                    role = role.trim().ifEmpty { "Maintenance Engineer" },
+                    shift = shift.trim().ifEmpty { "Day Shift" }
+                )
+            }
+            repo.saveEngineer(entity)
+            _events.emit(UiEvent.Snackbar("Engineer \"$cleanName\" saved"))
+        }
+    }
+
+    fun deleteEngineer(engineerId: Long) {
+        viewModelScope.launch {
+            repo.deleteEngineer(engineerId)
+            _events.emit(UiEvent.Snackbar("Engineer removed"))
+        }
+    }
+
+    // --- Task CRUD, Completion & Rejection ---
     fun saveTask(
         id: Long,
         uuid: String?,
@@ -359,6 +401,7 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
         deadlineMillis: Long,
         estimatedMinutes: Int,
         personInCharge: String,
+        assistantEngineers: String,
         reminderEnabled: Boolean,
         reminderLeadHours: Int,
         lastCompletedMillis: Long?
@@ -374,8 +417,9 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
                     deadlineMillis = deadlineMillis,
                     estimatedMinutes = estimatedMinutes.coerceAtLeast(1),
                     personInCharge = personInCharge.trim(),
+                    assistantEngineers = assistantEngineers.trim(),
                     reminderEnabled = reminderEnabled,
-                    reminderLeadHours = reminderLeadHours
+                    reminderLeadHours = reminderLeadHours.coerceAtLeast(1)
                 )
             } else {
                 MaintenanceTaskEntity(
@@ -389,8 +433,9 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
                     deadlineMillis = deadlineMillis,
                     estimatedMinutes = estimatedMinutes.coerceAtLeast(1),
                     personInCharge = personInCharge.trim(),
+                    assistantEngineers = assistantEngineers.trim(),
                     reminderEnabled = reminderEnabled,
-                    reminderLeadHours = reminderLeadHours,
+                    reminderLeadHours = reminderLeadHours.coerceAtLeast(1),
                     lastCompletedMillis = lastCompletedMillis
                 )
             }
@@ -410,6 +455,7 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
     fun completeTask(
         taskId: Long,
         personInCharge: String,
+        assistantEngineers: List<String>,
         actualDurationMinutes: Int,
         notes: String,
         spareParts: List<SparePartDraft>,
@@ -417,43 +463,44 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
         malfunctionSeverity: Severity
     ) {
         viewModelScope.launch {
+            val task = uiState.value.tasks.find { it.id == taskId }
             repo.completeTask(
                 taskId = taskId,
                 personInCharge = personInCharge,
+                assistantEngineers = assistantEngineers,
                 actualDurationMinutes = actualDurationMinutes,
                 notes = notes,
                 spareParts = spareParts,
                 flagMalfunction = flagMalfunction,
                 malfunctionSeverity = malfunctionSeverity
             )
-            _events.emit(UiEvent.Snackbar("Service logged & next cycle scheduled"))
+            MaintenanceReminderScheduler.triggerImmediateReminderCheck(getApplication())
+            val msg = if (task != null && task.cadence != Cadence.ONCE) {
+                "Task done · Report generated & next ${task.cadence.label.lowercase()} task recreated"
+            } else {
+                "Task completed & report generated"
+            }
+            _events.emit(UiEvent.Snackbar(msg))
         }
     }
 
-    fun logServiceOrMalfunction(
-        machineId: Long,
-        entryType: ServiceEntryType,
-        summaryTitle: String,
-        details: String,
-        severity: Severity,
+    fun rejectTask(
+        taskId: Long,
         personInCharge: String,
-        durationMinutes: Int,
-        spareParts: List<SparePartDraft>,
-        newMachineStatus: MachineStatus?
+        assistantEngineers: List<String>,
+        rejectionReason: String,
+        rescheduleNextCycle: Boolean
     ) {
         viewModelScope.launch {
-            repo.logServiceOrMalfunction(
-                machineId = machineId,
-                entryType = entryType,
-                summaryTitle = summaryTitle,
-                details = details,
-                severity = severity,
+            repo.rejectTask(
+                taskId = taskId,
                 personInCharge = personInCharge,
-                durationMinutes = durationMinutes,
-                spareParts = spareParts,
-                newMachineStatus = newMachineStatus
+                assistantEngineers = assistantEngineers,
+                rejectionReason = rejectionReason,
+                rescheduleNextCycle = rescheduleNextCycle
             )
-            _events.emit(UiEvent.Snackbar("${entryType.label} recorded"))
+            MaintenanceReminderScheduler.triggerImmediateReminderCheck(getApplication())
+            _events.emit(UiEvent.Snackbar("Task rejected & historical report recorded"))
         }
     }
 

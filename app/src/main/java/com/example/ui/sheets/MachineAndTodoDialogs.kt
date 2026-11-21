@@ -49,6 +49,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.data.CustomGroupEntity
+import com.example.data.EngineerEntity
 import com.example.data.GroupScope
 import com.example.data.MachineEntity
 import com.example.data.MachineStatus
@@ -56,6 +57,7 @@ import com.example.data.ReminderPriority
 import com.example.data.RepeatRule
 import com.example.data.TodoReminderEntity
 import com.example.ui.components.DateTimePickerField
+import com.example.ui.components.EngineerPickerField
 import com.example.ui.theme.groupColorForKey
 import java.util.concurrent.TimeUnit
 
@@ -387,6 +389,7 @@ fun TodoEditorDialog(
     defaultEngineerName: String,
     machines: List<MachineEntity>,
     groups: List<CustomGroupEntity>,
+    engineers: List<EngineerEntity>,
     onDismiss: () -> Unit,
     onSave: (
         id: Long,
@@ -408,7 +411,13 @@ fun TodoEditorDialog(
     var notes by remember { mutableStateOf(initialTodo?.notes ?: "") }
     var machineId by remember { mutableStateOf(initialTodo?.machineId) }
     var groupId by remember { mutableStateOf(initialTodo?.groupId) }
-    var pic by remember { mutableStateOf(initialTodo?.personInCharge ?: defaultEngineerName) }
+    val initialPic = remember(initialTodo, defaultEngineerName, engineers) {
+        val cand = initialTodo?.personInCharge ?: defaultEngineerName
+        engineers.find { it.name.equals(cand.trim(), ignoreCase = true) }?.name
+            ?: engineers.firstOrNull()?.name
+            ?: ""
+    }
+    var pic by remember { mutableStateOf(initialPic) }
     var repeatRule by remember { mutableStateOf(initialTodo?.repeatRule ?: RepeatRule.ONCE) }
     var dueAtMillis by remember {
         mutableStateOf(initialTodo?.dueAtMillis ?: (System.currentTimeMillis() + TimeUnit.HOURS.toMillis(2)))
@@ -416,6 +425,7 @@ fun TodoEditorDialog(
     var reminderEnabled by remember { mutableStateOf(initialTodo?.reminderEnabled ?: true) }
     var priority by remember { mutableStateOf(initialTodo?.priority ?: ReminderPriority.NORMAL) }
     var titleError by remember { mutableStateOf(false) }
+    var picError by remember { mutableStateOf(false) }
 
     var showMachineMenu by remember { mutableStateOf(false) }
     var showGroupMenu by remember { mutableStateOf(false) }
@@ -485,13 +495,27 @@ fun TodoEditorDialog(
                     }
                 }
 
-                OutlinedTextField(
-                    value = pic,
-                    onValueChange = { pic = it },
-                    label = { Text("Person In Charge") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                EngineerPickerField(
+                    label = "Person In Charge (PIC) *",
+                    selectedName = pic,
+                    engineers = engineers,
+                    onSelect = {
+                        pic = it
+                        picError = false
+                    },
+                    testTag = "todo_pic_picker"
                 )
+                if (picError) {
+                    Text(
+                        text = if (engineers.isEmpty()) {
+                            "No engineers registered. Add an engineer in the Engineers tab first."
+                        } else {
+                            "Please select a registered engineer."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
 
                 Box {
                     val m = machineId?.let { mid -> machines.find { it.id == mid } }
@@ -565,6 +589,11 @@ fun TodoEditorDialog(
                         titleError = true
                         return@Button
                     }
+                    val validPic = engineers.find { it.name.equals(pic.trim(), ignoreCase = true) }?.name
+                    if (validPic == null) {
+                        picError = true
+                        return@Button
+                    }
                     onSave(
                         initialTodo?.id ?: 0L,
                         initialTodo?.uuid,
@@ -572,7 +601,7 @@ fun TodoEditorDialog(
                         notes,
                         machineId,
                         groupId,
-                        pic,
+                        validPic,
                         repeatRule,
                         dueAtMillis,
                         reminderEnabled,

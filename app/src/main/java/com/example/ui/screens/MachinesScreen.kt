@@ -25,7 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DeleteOutline
@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.TableView
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -74,6 +75,7 @@ import com.example.data.MachineStatus
 import com.example.data.MaintenanceTaskEntity
 import com.example.data.ServiceEntryType
 import com.example.data.ServiceLogWithParts
+import com.example.data.TaskOutcome
 import com.example.engine.Formatters
 import com.example.ui.MachinaUiState
 import com.example.ui.MachineFilterState
@@ -84,6 +86,7 @@ import com.example.ui.components.GroupBadge
 import com.example.ui.components.MachineStatusBadge
 import com.example.ui.components.SeverityPill
 import com.example.ui.components.StatusPill
+import com.example.ui.components.TaskOutcomePill
 import com.example.ui.theme.LocalMachinaColors
 
 @Composable
@@ -98,7 +101,7 @@ fun MachinesScreen(
     onUpdateMachineStatus: (Long, MachineStatus) -> Unit,
     onAddTaskForMachine: (Long) -> Unit,
     onCompleteTask: (MaintenanceTaskEntity) -> Unit,
-    onLogMalfunctionForMachine: (Long) -> Unit,
+    onRejectTask: (MaintenanceTaskEntity) -> Unit,
     onManageGroups: () -> Unit,
     onImportExcel: () -> Unit,
     modifier: Modifier = Modifier
@@ -125,7 +128,7 @@ fun MachinesScreen(
             onUpdateStatus = { status -> onUpdateMachineStatus(selectedMachine.id, status) },
             onAddTask = { onAddTaskForMachine(selectedMachine.id) },
             onCompleteTask = onCompleteTask,
-            onLogMalfunction = { onLogMalfunctionForMachine(selectedMachine.id) },
+            onRejectTask = onRejectTask,
             modifier = modifier.fillMaxSize()
         )
         return
@@ -157,7 +160,7 @@ fun MachinesScreen(
                     onUpdateStatus = { status -> onUpdateMachineStatus(selectedMachine.id, status) },
                     onAddTask = { onAddTaskForMachine(selectedMachine.id) },
                     onCompleteTask = onCompleteTask,
-                    onLogMalfunction = { onLogMalfunctionForMachine(selectedMachine.id) },
+                    onRejectTask = onRejectTask,
                     modifier = Modifier
                         .weight(0.57f)
                         .fillMaxHeight()
@@ -557,7 +560,7 @@ private fun MachineDetailPane(
     onUpdateStatus: (MachineStatus) -> Unit,
     onAddTask: () -> Unit,
     onCompleteTask: (MaintenanceTaskEntity) -> Unit,
-    onLogMalfunction: () -> Unit,
+    onRejectTask: (MaintenanceTaskEntity) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val group = machine.groupId?.let { gid -> state.groups.find { it.id == gid } }
@@ -645,33 +648,22 @@ private fun MachineDetailPane(
                         }
                     }
 
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
+                    Button(
+                        onClick = onAddTask,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .minimumInteractiveComponentSize()
+                            .testTag("machine_add_task_button")
                     ) {
-                        OutlinedButton(
-                            onClick = onAddTask,
-                            modifier = Modifier
-                                .weight(1f)
-                                .minimumInteractiveComponentSize()
-                                .testTag("machine_add_task_button")
-                        ) {
-                            Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Add Task")
-                        }
-                        Button(
-                            onClick = onLogMalfunction,
-                            modifier = Modifier
-                                .weight(1f)
-                                .minimumInteractiveComponentSize()
-                                .testTag("machine_log_malfunction_button")
-                        ) {
-                            Icon(Icons.Filled.Build, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Log Service / Fault")
-                        }
+                        Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Add New Service Task")
                     }
+                    Text(
+                        text = "Reports below are automatically generated when a task is marked Complete or Rejected.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
@@ -720,17 +712,37 @@ private fun MachineDetailPane(
                             }
                             Text(task.title, style = MaterialTheme.typography.titleSmall)
                             Text(
-                                text = "PIC: ${task.personInCharge} · Est. ${Formatters.formatDuration(task.estimatedMinutes)}",
+                                text = buildString {
+                                    append("PIC: ${task.personInCharge}")
+                                    if (task.assistantEngineers.isNotBlank()) {
+                                        append(" (+${task.assistantEngineers})")
+                                    }
+                                    append(" · Est. ${Formatters.formatDuration(task.estimatedMinutes)}")
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         Spacer(Modifier.width(8.dp))
-                        Button(
-                            onClick = { onCompleteTask(task) },
-                            modifier = Modifier.minimumInteractiveComponentSize()
-                        ) {
-                            Text("Done")
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedButton(
+                                onClick = { onRejectTask(task) },
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = sem.critical),
+                                border = BorderStroke(1.dp, sem.critical.copy(alpha = 0.5f)),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                modifier = Modifier.minimumInteractiveComponentSize()
+                            ) {
+                                Icon(Icons.Filled.Block, contentDescription = "Reject task", modifier = Modifier.size(15.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Reject")
+                            }
+                            Button(
+                                onClick = { onCompleteTask(task) },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.minimumInteractiveComponentSize()
+                            ) {
+                                Text("Done")
+                            }
                         }
                     }
                 }
@@ -739,7 +751,7 @@ private fun MachineDetailPane(
 
         item(key = "machine_logs_heading") {
             Text(
-                text = "Service & Malfunction History (${machineLogs.size})",
+                text = "Machine Service & Rejection Reports (${machineLogs.size})",
                 style = MaterialTheme.typography.titleMedium
             )
         }
@@ -748,8 +760,8 @@ private fun MachineDetailPane(
             item(key = "no_machine_logs") {
                 EmptyStateCard(
                     icon = Icons.Filled.Warning,
-                    title = "No history logged yet",
-                    subtitle = "Completed tasks and malfunction repairs for this machine appear here."
+                    title = "No reports generated yet",
+                    subtitle = "Machine reports appear automatically when tasks are marked Done or Rejected."
                 )
             }
         } else {
@@ -768,24 +780,27 @@ private fun MachineDetailPane(
 private fun MachineHistoryMiniCard(item: ServiceLogWithParts) {
     val log = item.log
     val sem = LocalMachinaColors.current
+    val isRejected = log.outcome == TaskOutcome.REJECTED
     val isMalfunction = log.entryType == ServiceEntryType.MALFUNCTION_REPAIR
     Surface(
         color = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        border = BorderStroke(
+            1.dp,
+            if (isRejected) sem.critical.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outlineVariant
+        ),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
             verticalArrangement = Arrangement.spacedBy(4.dp),
             modifier = Modifier.padding(12.dp)
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                StatusPill(
-                    text = if (isMalfunction) "MALFUNCTION" else "PREVENTIVE",
-                    containerColor = if (isMalfunction) sem.criticalContainer else sem.operationalContainer,
-                    contentColor = if (isMalfunction) sem.critical else sem.operational
-                )
-                SeverityPill(log.severity)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                TaskOutcomePill(log.outcome)
+                if (isMalfunction && !isRejected) {
+                    StatusPill("MALFUNCTION", sem.criticalContainer, sem.critical)
+                    SeverityPill(log.severity)
+                }
                 Spacer(Modifier.weight(1f))
                 Text(
                     text = Formatters.formatDateOnly(log.completedAtMillis),
@@ -794,7 +809,13 @@ private fun MachineHistoryMiniCard(item: ServiceLogWithParts) {
                 )
             }
             Text(log.summaryTitle, style = MaterialTheme.typography.titleSmall)
-            if (log.malfunctionDetails.isNotBlank()) {
+            if (isRejected && log.rejectionReason.isNotBlank()) {
+                Text(
+                    text = "Rejection Reason: ${log.rejectionReason}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = sem.critical
+                )
+            } else if (log.malfunctionDetails.isNotBlank()) {
                 Text(
                     text = log.malfunctionDetails,
                     style = MaterialTheme.typography.bodySmall,
@@ -802,7 +823,15 @@ private fun MachineHistoryMiniCard(item: ServiceLogWithParts) {
                 )
             }
             Text(
-                text = "PIC: ${log.personInCharge} · Time: ${Formatters.formatDuration(log.serviceDurationMinutes)}",
+                text = buildString {
+                    append("PIC: ${log.personInCharge}")
+                    if (log.assistantEngineers.isNotBlank()) {
+                        append(" · Assistants: ${log.assistantEngineers}")
+                    }
+                    if (!isRejected) {
+                        append(" · Time: ${Formatters.formatDuration(log.serviceDurationMinutes)}")
+                    }
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

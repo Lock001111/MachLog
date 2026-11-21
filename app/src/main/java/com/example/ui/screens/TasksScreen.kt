@@ -24,13 +24,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FolderSpecial
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Person
@@ -40,17 +41,21 @@ import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.TableView
 import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -64,17 +69,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.Cadence
 import com.example.data.CustomGroupEntity
 import com.example.data.MachineEntity
 import com.example.data.MaintenanceTaskEntity
+import com.example.data.TodoReminderEntity
 import com.example.engine.Formatters
 import com.example.ui.MachinaUiState
 import com.example.ui.TaskGroupBy
 import com.example.ui.TasksFilterState
+import com.example.ui.TodoFilterState
 import com.example.ui.components.CadencePill
 import com.example.ui.components.EmptyStateCard
 import com.example.ui.components.GroupBadge
@@ -83,13 +89,89 @@ import com.example.ui.components.StatusPill
 import com.example.ui.theme.LocalMachinaColors
 import java.util.concurrent.TimeUnit
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TasksScreen(
+    state: MachinaUiState,
+    selectedSubTab: Int,
+    onSelectSubTab: (Int) -> Unit,
+    onUpdateFilter: ((TasksFilterState) -> TasksFilterState) -> Unit,
+    onAddTask: () -> Unit,
+    onEditTask: (MaintenanceTaskEntity) -> Unit,
+    onCompleteTask: (MaintenanceTaskEntity) -> Unit,
+    onRejectTask: (MaintenanceTaskEntity) -> Unit,
+    onManageGroups: () -> Unit,
+    onImportExcel: () -> Unit,
+    onUpdateTodoFilter: ((TodoFilterState) -> TodoFilterState) -> Unit,
+    onToggleTodoComplete: (TodoReminderEntity) -> Unit,
+    onAddTodo: () -> Unit,
+    onEditTodo: (TodoReminderEntity) -> Unit,
+    onDeleteTodo: (TodoReminderEntity) -> Unit,
+    onDeleteLog: (Long) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val openTodoCount = remember(state.todos) { state.todos.count { !it.isCompleted } }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        PrimaryTabRow(selectedTabIndex = selectedSubTab.coerceIn(0, 2)) {
+            Tab(
+                selected = selectedSubTab == 0,
+                onClick = { onSelectSubTab(0) },
+                text = { Text("Active (${state.tasks.size})", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                modifier = Modifier.testTag("tasks_subtab_active")
+            )
+            Tab(
+                selected = selectedSubTab == 1,
+                onClick = { onSelectSubTab(1) },
+                text = { Text("To-Do ($openTodoCount)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                modifier = Modifier.testTag("tasks_subtab_todo")
+            )
+            Tab(
+                selected = selectedSubTab == 2,
+                onClick = { onSelectSubTab(2) },
+                text = { Text("History (${state.serviceLogs.size})", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                modifier = Modifier.testTag("tasks_subtab_history")
+            )
+        }
+
+        when (selectedSubTab) {
+            1 -> TodoRemindersSubTab(
+                state = state,
+                onUpdateFilter = onUpdateTodoFilter,
+                onToggleComplete = onToggleTodoComplete,
+                onAddTodo = onAddTodo,
+                onEditTodo = onEditTodo,
+                onDeleteTodo = onDeleteTodo,
+                modifier = Modifier.weight(1f)
+            )
+            2 -> TaskHistorySubTab(
+                state = state,
+                onDeleteLog = onDeleteLog,
+                modifier = Modifier.weight(1f)
+            )
+            else -> ActiveTasksSubTab(
+                state = state,
+                onUpdateFilter = onUpdateFilter,
+                onAddTask = onAddTask,
+                onEditTask = onEditTask,
+                onCompleteTask = onCompleteTask,
+                onRejectTask = onRejectTask,
+                onManageGroups = onManageGroups,
+                onImportExcel = onImportExcel,
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ActiveTasksSubTab(
     state: MachinaUiState,
     onUpdateFilter: ((TasksFilterState) -> TasksFilterState) -> Unit,
     onAddTask: () -> Unit,
     onEditTask: (MaintenanceTaskEntity) -> Unit,
     onCompleteTask: (MaintenanceTaskEntity) -> Unit,
+    onRejectTask: (MaintenanceTaskEntity) -> Unit,
     onManageGroups: () -> Unit,
     onImportExcel: () -> Unit,
     modifier: Modifier = Modifier
@@ -111,12 +193,14 @@ fun TasksScreen(
             val matchOverdue = !filter.overdueOnly || task.deadlineMillis < now
             val matchGroup = filter.groupId == null || effectiveGroupId == filter.groupId
             val matchPic = filter.picFilter.isNullOrBlank() ||
-                task.personInCharge.equals(filter.picFilter, ignoreCase = true)
+                task.personInCharge.equals(filter.picFilter, ignoreCase = true) ||
+                task.assistantEngineers.contains(filter.picFilter, ignoreCase = true)
             val q = filter.searchQuery.trim()
             val matchQuery = q.isEmpty() ||
                 task.title.contains(q, ignoreCase = true) ||
                 task.description.contains(q, ignoreCase = true) ||
                 task.personInCharge.contains(q, ignoreCase = true) ||
+                task.assistantEngineers.contains(q, ignoreCase = true) ||
                 (machine?.name?.contains(q, ignoreCase = true) == true) ||
                 (machine?.assetCode?.contains(q, ignoreCase = true) == true)
             matchCadence && matchOverdue && matchGroup && matchPic && matchQuery
@@ -153,7 +237,6 @@ fun TasksScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = modifier.fillMaxSize()
     ) {
-        // Overdue Alert Banner
         item(key = "overdue_banner") {
             AnimatedVisibility(visible = overdueCount > 0) {
                 OverdueAlertBanner(
@@ -166,7 +249,6 @@ fun TasksScreen(
             }
         }
 
-        // Search & Grouping Controls
         item(key = "search_and_grouping") {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
@@ -221,7 +303,6 @@ fun TasksScreen(
                     }
                 }
 
-                // Cadence Chips + Overdue + PIC
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -282,7 +363,6 @@ fun TasksScreen(
                     }
                 }
 
-                // Custom Group Chips
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -336,8 +416,8 @@ fun TasksScreen(
                 EmptyStateCard(
                     icon = Icons.Filled.TaskAlt,
                     title = "No matching maintenance tasks",
-                    subtitle = "Adjust your cadence, custom group, or search filters, or create a new preventive schedule.",
-                    actionLabel = "New Maintenance Task",
+                    subtitle = "Adjust your cadence, custom group, or search filters, or create a new task.",
+                    actionLabel = "New Task",
                     onAction = onAddTask
                 )
             }
@@ -398,6 +478,7 @@ fun TasksScreen(
                             group = group,
                             nowMillis = now,
                             onComplete = { onCompleteTask(task) },
+                            onReject = { onRejectTask(task) },
                             onEdit = { onEditTask(task) }
                         )
                     }
@@ -418,6 +499,7 @@ private fun MaintenanceTaskCard(
     group: CustomGroupEntity?,
     nowMillis: Long,
     onComplete: () -> Unit,
+    onReject: () -> Unit,
     onEdit: () -> Unit
 ) {
     val sem = LocalMachinaColors.current
@@ -470,12 +552,22 @@ private fun MaintenanceTaskCard(
                         GroupBadge(group)
                     }
                     Spacer(Modifier.weight(1f))
-                    Icon(
-                        imageVector = if (task.reminderEnabled) Icons.Filled.NotificationsActive else Icons.Filled.NotificationsOff,
-                        contentDescription = if (task.reminderEnabled) "Reminder active" else "Reminder off",
-                        tint = if (task.reminderEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                        modifier = Modifier.size(16.dp)
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = if (task.reminderEnabled) Icons.Filled.NotificationsActive else Icons.Filled.NotificationsOff,
+                            contentDescription = if (task.reminderEnabled) "Reminder active" else "Reminder off",
+                            tint = if (task.reminderEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        if (task.reminderEnabled) {
+                            Spacer(Modifier.width(3.dp))
+                            Text(
+                                text = Formatters.formatLeadTime(task.reminderLeadHours),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
                 }
 
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -505,7 +597,6 @@ private fun MaintenanceTaskCard(
                     }
                 }
 
-                // Telemetry Metadata Row: Deadline, PIC, Duration
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -536,6 +627,17 @@ private fun MaintenanceTaskCard(
                         Spacer(Modifier.width(3.dp))
                         Text(task.personInCharge, style = MaterialTheme.typography.labelSmall)
                     }
+                    if (task.assistantEngineers.isNotBlank()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Groups, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(3.dp))
+                            Text(
+                                text = "+ ${task.assistantEngineers}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Schedule, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.width(3.dp))
@@ -543,31 +645,44 @@ private fun MaintenanceTaskCard(
                     }
                 }
 
-                // Action Row
                 Row(
-                    horizontalArrangement = Arrangement.End,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     OutlinedButton(
                         onClick = onEdit,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                         modifier = Modifier
                             .minimumInteractiveComponentSize()
                             .testTag("edit_task_button_${task.id}")
                     ) {
-                        Icon(Icons.Filled.Edit, contentDescription = "Edit task", modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
+                        Icon(Icons.Filled.Edit, contentDescription = "Edit task", modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(4.dp))
                         Text("Edit")
                     }
-                    Spacer(Modifier.width(8.dp))
+                    OutlinedButton(
+                        onClick = onReject,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = sem.critical),
+                        border = BorderStroke(1.dp, sem.critical.copy(alpha = 0.55f)),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("reject_task_button_${task.id}")
+                    ) {
+                        Icon(Icons.Filled.Block, contentDescription = "Reject task", modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Reject")
+                    }
                     Button(
                         onClick = onComplete,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                         modifier = Modifier
                             .minimumInteractiveComponentSize()
                             .testTag("complete_task_button_${task.id}")
                     ) {
-                        Icon(Icons.Filled.CheckCircle, contentDescription = "Complete task", modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
+                        Icon(Icons.Filled.CheckCircle, contentDescription = "Complete task", modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(4.dp))
                         Text("Complete")
                     }
                 }

@@ -42,4 +42,14 @@ object Formatters {
         }
         return if (diff < 0) "Overdue $span" else "Due in $span"
     }
+
+    fun formatLeadTime(hours: Int): String {
+        val safe = hours.coerceAtLeast(1)
+        return if (safe >= 24 && safe % 24 == 0) {
+            val days = safe / 24
+            if (days == 1) "1 day" else "$days days"
+        } else {
+            if (safe == 1) "1 hour" else "$safe hours"
+        }
+    }
 }

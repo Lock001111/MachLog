@@ -9,10 +9,16 @@ import androidx.room.Relation
 import java.util.UUID
 
 enum class Cadence(val label: String) {
+    ONCE("One-Time"),
     DAILY("Daily"),
     WEEKLY("Weekly"),
     MONTHLY("Monthly"),
     YEARLY("Yearly")
+}
+
+enum class TaskOutcome(val label: String) {
+    DONE("Done"),
+    REJECTED("Rejected")
 }
 
 enum class MachineStatus(val label: String) {
@@ -58,6 +64,23 @@ enum class AutoBackupFrequency(val label: String) {
     DAILY("Daily Auto-Backup"),
     WEEKLY("Weekly Auto-Backup")
 }
+
+@Entity(
+    tableName = "engineers",
+    indices = [
+        Index(value = ["uuid"], unique = true),
+        Index(value = ["name"])
+    ]
+)
+data class EngineerEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val uuid: String = UUID.randomUUID().toString(),
+    val name: String,
+    val employeeCode: String = "",
+    val role: String = "Maintenance Engineer",
+    val shift: String = "Day Shift",
+    val updatedAtMillis: Long = System.currentTimeMillis()
+)
 
 @Entity(
     tableName = "custom_groups",
@@ -133,6 +156,7 @@ data class MaintenanceTaskEntity(
     val deadlineMillis: Long,
     val estimatedMinutes: Int = 30,
     val personInCharge: String,
+    val assistantEngineers: String = "",
     val reminderEnabled: Boolean = true,
     val reminderLeadHours: Int = 24,
     val lastCompletedMillis: Long? = null,
@@ -206,11 +230,14 @@ data class ServiceLogEntity(
     val machineId: Long,
     val taskId: Long? = null,
     val entryType: ServiceEntryType,
+    val outcome: TaskOutcome = TaskOutcome.DONE,
     val cadenceSnapshot: Cadence? = null,
     val summaryTitle: String,
     val malfunctionDetails: String = "",
+    val rejectionReason: String = "",
     val severity: Severity = Severity.LOW,
     val personInCharge: String,
+    val assistantEngineers: String = "",
     val serviceDurationMinutes: Int,
     val completedAtMillis: Long,
     val deadlineWasMet: Boolean = true,
@@ -269,4 +296,13 @@ data class WarehousePartEntity(
     val defaultUnit: String = "pcs",
     val updatedAtMillis: Long = System.currentTimeMillis()
 )
+
+fun parseEngineerList(raw: String): List<String> =
+    raw.split(",").map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+
+fun formatEngineerList(names: List<String>, excludePic: String? = null): String =
+    names.map { it.trim() }
+        .filter { it.isNotEmpty() && !it.equals(excludePic?.trim(), ignoreCase = true) }
+        .distinct()
+        .joinToString(", ")
 

@@ -22,6 +22,10 @@ import com.example.engine.LocalWebServerManager
 import com.example.engine.PortableBackupPackage
 import com.example.engine.ReportExportEngine
 import com.example.data.MachineStatus
+import com.example.data.TaskOutcome
+import com.example.data.formatEngineerList
+import com.example.data.parseEngineerList
+import com.example.engine.Formatters
 import com.example.ui.screens.filterWarehouseParts
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -279,13 +283,13 @@ class MachinaLogicTest {
             ),
             tasks = listOf(
                 // Identical task (without explicit deadline column) -> skipped duplicate
-                ImportedTaskRow("MCH-100", "Check Spindle Coolant", "Inspect coolant level", Cadence.DAILY, 9999999999999L, 15, "Elena", "", true, hasExplicitDeadline = false),
+                ImportedTaskRow("MCH-100", "Check Spindle Coolant", "Inspect coolant level", Cadence.DAILY, 9999999999999L, 15, "Elena", groupName = "", reminderEnabled = true, hasExplicitDeadline = false),
                 // Changed description & PIC -> 1 updated
-                ImportedTaskRow("MCH-100", "Filter Flush", "Updated ultrasonic flush", Cadence.WEEKLY, 1700000000000L, 30, "Marcus", "", true, hasExplicitDeadline = true),
+                ImportedTaskRow("MCH-100", "Filter Flush", "Updated ultrasonic flush", Cadence.WEEKLY, 1700000000000L, 30, "Marcus", groupName = "", reminderEnabled = true, hasExplicitDeadline = true),
                 // Brand new task on existing machine -> 1 new
-                ImportedTaskRow("MCH-100", "Axis Grease", "Lubricate ballscrews", Cadence.MONTHLY, 1700000000000L, 45, "Elena", "", true, hasExplicitDeadline = true),
+                ImportedTaskRow("MCH-100", "Axis Grease", "Lubricate ballscrews", Cadence.MONTHLY, 1700000000000L, 45, "Elena", groupName = "", reminderEnabled = true, hasExplicitDeadline = true),
                 // Brand new task on newly imported machine -> 1 new
-                ImportedTaskRow("MCH-200", "Ram Seal Check", "Verify zero drip", Cadence.DAILY, 1700000000000L, 20, "Marcus", "", true, hasExplicitDeadline = true)
+                ImportedTaskRow("MCH-200", "Ram Seal Check", "Verify zero drip", Cadence.DAILY, 1700000000000L, 20, "Marcus", groupName = "", reminderEnabled = true, hasExplicitDeadline = true)
             ),
             todos = emptyList(),
             warehouseParts = listOf(
@@ -323,5 +327,154 @@ class MachinaLogicTest {
         assertEquals(4, diff.totalNew)
         assertEquals(2, diff.totalUpdated)
         assertEquals(4, diff.totalSkippedDuplicates)
+    }
+
+    @Test
+    fun `engineer list helpers and lead time formatter behave accurately`() {
+        val parsed = parseEngineerList(" Marcus Chen , Elena Vance, marcus chen , , Priya Nair ")
+        assertEquals(listOf("Marcus Chen", "Elena Vance", "marcus chen", "Priya Nair"), parsed)
+
+        val formatted = formatEngineerList(
+            names = listOf("Elena Vance", "Marcus Chen", "Priya Nair", "Marcus Chen"),
+            excludePic = "elena vance"
+        )
+        assertEquals("Marcus Chen, Priya Nair", formatted)
+
+        assertEquals("1 hour", Formatters.formatLeadTime(1))
+        assertEquals("12 hours", Formatters.formatLeadTime(12))
+        assertEquals("1 day", Formatters.formatLeadTime(24))
+        assertEquals("3 days", Formatters.formatLeadTime(72))
+        assertEquals("36 hours", Formatters.formatLeadTime(36))
+    }
+
+    @Test
+    fun `report filter and xlsx export include outcome, rejection reason, and assistant engineers`() {
+        val m1 = MachineEntity(id = 10L, assetCode = "MCH-10", name = "Lathe", locationZone = "Bay 1", modelInfo = "L-10")
+        val doneLog = ServiceLogWithParts(
+            log = ServiceLogEntity(
+                id = 1L,
+                machineId = 10L,
+                entryType = ServiceEntryType.PREVENTIVE_SERVICE,
+                outcome = TaskOutcome.DONE,
+                cadenceSnapshot = Cadence.ONCE,
+                summaryTitle = "Spindle Alignment",
+                malfunctionDetails = "Aligned within 0.01mm",
+                personInCharge = "Elena Vance",
+                assistantEngineers = "Marcus Chen, Priya Nair",
+                serviceDurationMinutes = 50,
+                completedAtMillis = 1700000000000L
+            )
+        )
+        val rejectedLog = ServiceLogWithParts(
+            log = ServiceLogEntity(
+                id = 2L,
+                machineId = 10L,
+                entryType = ServiceEntryType.PREVENTIVE_SERVICE,
+                outcome = TaskOutcome.REJECTED,
+                cadenceSnapshot = Cadence.WEEKLY,
+                summaryTitle = "Hydraulic Flush",
+                rejectionReason = "Machine running priority batch",
+                personInCharge = "Marcus Chen",
+                assistantEngineers = "Elena Vance",
+                serviceDurationMinutes = 0,
+                completedAtMillis = 1700005000000L
+            )
+        )
+
+        val onlyRejected = ReportExportEngine.filterDataset(
+            params = ExportFilterParams(outcome = TaskOutcome.REJECTED),
+            machines = listOf(m1),
+            groups = emptyList(),
+            allTasks = emptyList(),
+            allLogs = listOf(doneLog, rejectedLog)
+        )
+        assertEquals(1, onlyRejected.logs.size)
+        assertEquals(TaskOutcome.REJECTED, onlyRejected.logs.first().log.outcome)
+
+        val baos = ByteArrayOutputStream()
+        ReportExportEngine.writeXlsx(baos, ExportFilterParams(outcome = TaskOutcome.REJECTED), onlyRejected)
+        val entries = mutableMapOf<String, String>()
+        ZipInputStream(ByteArrayInputStream(baos.toByteArray())).use { zis ->
+            var entry = zis.nextEntry
+            while (entry != null) {
+                entries[entry.name] = zis.readBytes().toString(Charsets.UTF_8)
+                entry = zis.nextEntry
+            }
+        }
+        val sheet3 = entries["xl/worksheets/sheet3.xml"].orEmpty()
+        assertTrue(sheet3.contains("Rejected"))
+        assertTrue(sheet3.contains("Machine running priority batch"))
+        assertTrue(sheet3.contains("Elena Vance"))
+    }
+
+    @Test
+    fun `backup v2 json parser decodes engineers, outcomes, and task reminder lead hours`() {
+        val sampleJson = """
+            {
+              "schemaVersion": 2,
+              "exportedAtMillis": 1700000000000,
+              "deviceLabel": "Pixel Tablet",
+              "groups": [],
+              "machines": [],
+              "engineers": [
+                {
+                  "uuid": "eng-1",
+                  "name": "Elena Vance",
+                  "employeeCode": "ENG-01",
+                  "role": "Lead Engineer",
+                  "shift": "Day Shift",
+                  "updatedAtMillis": 1700000000000
+                }
+              ],
+              "tasks": [
+                {
+                  "uuid": "tsk-1",
+                  "machineUuid": "m-1",
+                  "title": "Check Valve",
+                  "description": "",
+                  "cadence": "ONCE",
+                  "deadlineMillis": 1700010000000,
+                  "estimatedMinutes": 20,
+                  "personInCharge": "Elena Vance",
+                  "assistantEngineers": "Marcus Chen",
+                  "reminderEnabled": true,
+                  "reminderLeadHours": 48,
+                  "updatedAtMillis": 1700000000000
+                }
+              ],
+              "todos": [],
+              "serviceLogs": [
+                {
+                  "uuid": "log-1",
+                  "machineUuid": "m-1",
+                  "entryType": "PREVENTIVE_SERVICE",
+                  "outcome": "REJECTED",
+                  "rejectionReason": "Safety lockout active",
+                  "summaryTitle": "Check Valve",
+                  "malfunctionDetails": "",
+                  "severity": "LOW",
+                  "personInCharge": "Elena Vance",
+                  "assistantEngineers": "Marcus Chen",
+                  "serviceDurationMinutes": 0,
+                  "completedAtMillis": 1700005000000,
+                  "deadlineWasMet": false,
+                  "updatedAtMillis": 1700005000000,
+                  "spareParts": []
+                }
+              ],
+              "warehouseParts": []
+            }
+        """.trimIndent()
+
+        val parsed = BackupSyncManager.parseBackupJson(sampleJson)
+        assertNotNull(parsed)
+        assertEquals(2, parsed?.schemaVersion)
+        assertEquals(1, parsed?.engineers?.size)
+        assertEquals("Elena Vance", parsed?.engineers?.firstOrNull()?.name)
+        assertEquals(48, parsed?.tasks?.firstOrNull()?.reminderLeadHours)
+        assertEquals("ONCE", parsed?.tasks?.firstOrNull()?.cadence)
+        assertEquals("REJECTED", parsed?.serviceLogs?.firstOrNull()?.outcome)
+        assertEquals("Safety lockout active", parsed?.serviceLogs?.firstOrNull()?.rejectionReason)
+        assertEquals("Marcus Chen", parsed?.serviceLogs?.firstOrNull()?.assistantEngineers)
     }
 }

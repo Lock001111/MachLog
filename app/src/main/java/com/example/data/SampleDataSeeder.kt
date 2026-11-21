@@ -13,9 +13,15 @@ object SampleDataSeeder {
             ) {
                 seedWarehouseCatalog(dao, System.currentTimeMillis())
             }
+            if (dao.getAllEngineersSync().isEmpty()) {
+                seedDefaultEngineers(dao, System.currentTimeMillis())
+            }
             return
         }
         if (dao.getAllMachinesSync().isNotEmpty()) {
+            if (dao.getAllEngineersSync().isEmpty()) {
+                seedDefaultEngineers(dao, System.currentTimeMillis())
+            }
             prefs.setSampleDataSeeded(true)
             return
         }
@@ -29,10 +35,24 @@ object SampleDataSeeder {
         prefs.setSampleDataSeeded(true)
     }
 
+    private suspend fun seedDefaultEngineers(dao: MachinaDao, now: Long) {
+        val roster = listOf(
+            EngineerEntity(name = "Elena Vance", employeeCode = "ENG-01", role = "Senior Mechanical Engineer", shift = "Day Shift", updatedAtMillis = now),
+            EngineerEntity(name = "Marcus Chen", employeeCode = "ENG-02", role = "Electrical & Controls Lead", shift = "Day Shift", updatedAtMillis = now),
+            EngineerEntity(name = "Darius Patel", employeeCode = "ENG-03", role = "Hydraulics & Safety Specialist", shift = "Swing Shift", updatedAtMillis = now),
+            EngineerEntity(name = "Sofia Novak", employeeCode = "ENG-04", role = "Robotics & CNC Precision", shift = "Day Shift", updatedAtMillis = now),
+            EngineerEntity(name = "Alex Rivera", employeeCode = "ENG-05", role = "Shift Maintenance Engineer", shift = "Night Shift", updatedAtMillis = now)
+        )
+        roster.forEach { dao.insertEngineer(it) }
+    }
+
     private suspend fun insertSampleDataset(dao: MachinaDao) {
         val now = System.currentTimeMillis()
         val hour = TimeUnit.HOURS.toMillis(1)
         val day = TimeUnit.DAYS.toMillis(1)
+
+        // 0. Engineers Roster
+        seedDefaultEngineers(dao, now)
 
         // 1. Custom Groups
         val gCncId = dao.insertGroup(
@@ -130,7 +150,7 @@ object SampleDataSeeder {
             )
         )
 
-        // 3. Maintenance Tasks (Daily, Weekly, Monthly, Yearly)
+        // 3. Maintenance Tasks (Once, Daily, Weekly, Monthly, Yearly)
         val t1 = dao.insertTask(
             MaintenanceTaskEntity(
                 machineId = m1,
@@ -141,6 +161,7 @@ object SampleDataSeeder {
                 deadlineMillis = now + 3 * hour,
                 estimatedMinutes = 20,
                 personInCharge = "Elena Vance",
+                assistantEngineers = "Alex Rivera",
                 reminderEnabled = true,
                 reminderLeadHours = 4,
                 lastCompletedMillis = now - day,
@@ -173,6 +194,7 @@ object SampleDataSeeder {
                 deadlineMillis = now - 6 * hour, // Overdue
                 estimatedMinutes = 35,
                 personInCharge = "Darius Patel",
+                assistantEngineers = "Marcus Chen",
                 reminderEnabled = true,
                 reminderLeadHours = 24,
                 lastCompletedMillis = now - 8 * day,
@@ -205,6 +227,7 @@ object SampleDataSeeder {
                 deadlineMillis = now + 5 * day,
                 estimatedMinutes = 90,
                 personInCharge = "Sofia Novak",
+                assistantEngineers = "Elena Vance",
                 reminderEnabled = true,
                 reminderLeadHours = 48,
                 lastCompletedMillis = now - 25 * day,
@@ -221,6 +244,7 @@ object SampleDataSeeder {
                 deadlineMillis = now - 1 * day, // Overdue
                 estimatedMinutes = 75,
                 personInCharge = "Marcus Chen",
+                assistantEngineers = "Darius Patel",
                 reminderEnabled = true,
                 reminderLeadHours = 24,
                 lastCompletedMillis = now - 32 * day,
@@ -237,6 +261,7 @@ object SampleDataSeeder {
                 deadlineMillis = now + 18 * day,
                 estimatedMinutes = 240,
                 personInCharge = "Sofia Novak",
+                assistantEngineers = "Marcus Chen, Alex Rivera",
                 reminderEnabled = true,
                 reminderLeadHours = 72,
                 lastCompletedMillis = now - 347 * day,
@@ -247,15 +272,15 @@ object SampleDataSeeder {
             MaintenanceTaskEntity(
                 machineId = m3,
                 groupId = gSafetyId,
-                title = "Pressure Vessel & Safety Relief Valve Certification",
-                description = "Annual hydrostatic test & ASME relief valve bench certification.",
-                cadence = Cadence.YEARLY,
-                deadlineMillis = now + 40 * day,
-                estimatedMinutes = 180,
+                title = "Replace Discharge Pressure Transducer (One-Time)",
+                description = "Swap intermittent analog 4-20mA sensor after rush shift ends.",
+                cadence = Cadence.ONCE,
+                deadlineMillis = now + 12 * hour,
+                estimatedMinutes = 40,
                 personInCharge = "Darius Patel",
+                assistantEngineers = "Elena Vance",
                 reminderEnabled = true,
-                reminderLeadHours = 72,
-                lastCompletedMillis = now - 325 * day,
+                reminderLeadHours = 6,
                 updatedAtMillis = now
             )
         )
@@ -328,17 +353,19 @@ object SampleDataSeeder {
             )
         )
 
-        // 5. Historical Service & Malfunction Logs with Spare Parts Used
+        // 5. Historical Service & Rejected Task Reports (Auto-generated from Done/Rejected Tasks)
         dao.insertLogWithParts(
             ServiceLogEntity(
                 machineId = m3,
                 taskId = null,
                 entryType = ServiceEntryType.MALFUNCTION_REPAIR,
-                cadenceSnapshot = null,
+                outcome = TaskOutcome.DONE,
+                cadenceSnapshot = Cadence.ONCE,
                 summaryTitle = "Thermostatic Bypass Valve Stuck Closed",
                 malfunctionDetails = "Discharge temperature hit 101C triggering thermal trip. Disassembled cooler bypass housing and replaced faulty thermal element.",
                 severity = Severity.CRITICAL,
                 personInCharge = "Elena Vance",
+                assistantEngineers = "Darius Patel",
                 serviceDurationMinutes = 115,
                 completedAtMillis = now - 5 * hour,
                 deadlineWasMet = true,
@@ -346,8 +373,29 @@ object SampleDataSeeder {
             ),
             listOf(
                 SparePartUsedEntity(serviceLogId = 0, partName = "Thermostatic Valve Kit", partCode = "AC-2901-1095", partDescription = "65C oil cooler bypass cartridge & spring kit", fromWarehouse = true, quantity = 1, unit = "kit"),
-                SparePartUsedEntity(serviceLogId = 0, partName = "Viton O-Ring Seal 42mm", partCode = "OR-VT-42", partDescription = "High-temp fluoroelastomer housing seal", fromWarehouse = true, quantity = 2, unit = "pcs")
+                SparePartUsedEntity(serviceLogId = 0, partName = "Viton O-Ring Seal 42mm", partCode = "OR-VT-42", partDescription = "High-temp fluoroelastomer housing seal ring", fromWarehouse = true, quantity = 2, unit = "pcs")
             )
+        )
+
+        dao.insertLogWithParts(
+            ServiceLogEntity(
+                machineId = m2,
+                taskId = null,
+                entryType = ServiceEntryType.PREVENTIVE_SERVICE,
+                outcome = TaskOutcome.REJECTED,
+                cadenceSnapshot = Cadence.WEEKLY,
+                summaryTitle = "Main Cylinder Seal Replacement Request",
+                malfunctionDetails = "Task rejected at shift start.",
+                rejectionReason = "Machine locked into continuous automotive rush production run; servicing not possible until weekend shutdown.",
+                severity = Severity.MEDIUM,
+                personInCharge = "Darius Patel",
+                assistantEngineers = "Alex Rivera",
+                serviceDurationMinutes = 0,
+                completedAtMillis = now - 16 * hour,
+                deadlineWasMet = true,
+                updatedAtMillis = now
+            ),
+            emptyList()
         )
 
         dao.insertLogWithParts(
@@ -355,6 +403,7 @@ object SampleDataSeeder {
                 machineId = m4,
                 taskId = t2,
                 entryType = ServiceEntryType.MALFUNCTION_REPAIR,
+                outcome = TaskOutcome.DONE,
                 cadenceSnapshot = Cadence.DAILY,
                 summaryTitle = "Upper Sealing Jaw Burn-Through",
                 malfunctionDetails = "Film edge wrinkling caused by torn PTFE strip and drifting K-type thermocouple.",
@@ -376,11 +425,13 @@ object SampleDataSeeder {
                 machineId = m1,
                 taskId = t1,
                 entryType = ServiceEntryType.PREVENTIVE_SERVICE,
+                outcome = TaskOutcome.DONE,
                 cadenceSnapshot = Cadence.DAILY,
                 summaryTitle = "Coolant Concentration & Skimmer Service",
                 malfunctionDetails = "Adjusted Brix to 8.2% and cleared tramp oil skimmer belt.",
                 severity = Severity.LOW,
                 personInCharge = "Elena Vance",
+                assistantEngineers = "Alex Rivera",
                 serviceDurationMinutes = 20,
                 completedAtMillis = now - 1 * day,
                 deadlineWasMet = true,
@@ -396,11 +447,13 @@ object SampleDataSeeder {
                 machineId = m2,
                 taskId = t6,
                 entryType = ServiceEntryType.PREVENTIVE_SERVICE,
+                outcome = TaskOutcome.DONE,
                 cadenceSnapshot = Cadence.MONTHLY,
                 summaryTitle = "Hydraulic Return Filter & Manifold Flush",
                 malfunctionDetails = "Replaced clogged return cartridge (2.8 bar delta) and inspected proportional valve coils.",
                 severity = Severity.MEDIUM,
                 personInCharge = "Marcus Chen",
+                assistantEngineers = "Darius Patel",
                 serviceDurationMinutes = 80,
                 completedAtMillis = now - 6 * day,
                 deadlineWasMet = false,
@@ -417,11 +470,13 @@ object SampleDataSeeder {
                 machineId = m5,
                 taskId = t7,
                 entryType = ServiceEntryType.PREVENTIVE_SERVICE,
+                outcome = TaskOutcome.DONE,
                 cadenceSnapshot = Cadence.YEARLY,
                 summaryTitle = "Annual J1-J6 Gearbox Grease Replacement",
                 malfunctionDetails = "Completed full Molywhite RE No.00 grease exchange and verified payload repeatability.",
                 severity = Severity.LOW,
                 personInCharge = "Sofia Novak",
+                assistantEngineers = "Marcus Chen, Alex Rivera",
                 serviceDurationMinutes = 230,
                 completedAtMillis = now - 14 * day,
                 deadlineWasMet = true,
@@ -437,6 +492,7 @@ object SampleDataSeeder {
                 machineId = m1,
                 taskId = t5,
                 entryType = ServiceEntryType.PREVENTIVE_SERVICE,
+                outcome = TaskOutcome.DONE,
                 cadenceSnapshot = Cadence.MONTHLY,
                 summaryTitle = "Spindle Runout & Way-Lube Pump Check",
                 malfunctionDetails = "Runout measured 0.003mm. Replaced pneumatic way-lube inline check valve.",

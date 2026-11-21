@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.data.AppPreferences
 import com.example.data.Cadence
 import com.example.data.CustomGroupEntity
+import com.example.data.EngineerEntity
 import com.example.data.GroupScope
 import com.example.data.MachinaDao
 import com.example.data.MachineEntity
@@ -15,6 +16,7 @@ import com.example.data.RepeatRule
 import com.example.data.ServiceEntryType
 import com.example.data.Severity
 import com.example.data.SparePartDraft
+import com.example.data.TaskOutcome
 import com.example.data.TodoReminderEntity
 import com.example.data.WarehousePartEntity
 import com.squareup.moshi.Moshi
@@ -322,6 +324,7 @@ object LocalWebServerManager {
                     val tasks = dao.getAllTasksSync()
                     val todos = dao.getAllTodosSync()
                     val warehouse = dao.getAllWarehousePartsSync()
+                    val engineers = dao.getAllEngineersSync()
                     val logs = dao.getAllServiceLogsWithPartsSync()
 
                     jsonResponse(
@@ -337,13 +340,16 @@ object LocalWebServerManager {
                                 WebMachineDto(it.id, it.uuid, it.groupId, it.assetCode, it.name, it.locationZone, it.modelInfo, it.status.name, it.notes)
                             },
                             tasks = tasks.map {
-                                WebTaskDto(it.id, it.uuid, it.machineId, it.groupId, it.title, it.description, it.cadence.name, it.deadlineMillis, it.estimatedMinutes, it.personInCharge, it.reminderEnabled, it.reminderLeadHours, it.lastCompletedMillis)
+                                WebTaskDto(it.id, it.uuid, it.machineId, it.groupId, it.title, it.description, it.cadence.name, it.deadlineMillis, it.estimatedMinutes, it.personInCharge, it.assistantEngineers, it.reminderEnabled, it.reminderLeadHours, it.lastCompletedMillis)
                             },
                             todos = todos.map {
                                 WebTodoDto(it.id, it.uuid, it.title, it.notes, it.machineId, it.groupId, it.personInCharge, it.repeatRule.name, it.dueAtMillis, it.reminderEnabled, it.isCompleted, it.priority.name, it.completedAtMillis)
                             },
                             warehouseParts = warehouse.map {
                                 WebWarehousePartDto(it.id, it.uuid, it.partCode, it.partName, it.partDescription, it.defaultUnit)
+                            },
+                            engineers = engineers.map {
+                                WebEngineerDto(it.id, it.uuid, it.name, it.employeeCode, it.role, it.shift)
                             },
                             serviceLogs = logs.map { item ->
                                 val l = item.log
@@ -357,7 +363,10 @@ object LocalWebServerManager {
                                     summaryTitle = l.summaryTitle,
                                     malfunctionDetails = l.malfunctionDetails,
                                     severity = l.severity.name,
+                                    outcome = l.outcome.name,
+                                    rejectionReason = l.rejectionReason,
                                     personInCharge = l.personInCharge,
+                                    assistantEngineers = l.assistantEngineers,
                                     serviceDurationMinutes = l.serviceDurationMinutes,
                                     completedAtMillis = l.completedAtMillis,
                                     deadlineWasMet = l.deadlineWasMet,
@@ -418,6 +427,28 @@ object LocalWebServerManager {
                     jsonResponse(200, "OK", WebActionResult(true, "Machine deleted"))
                 }
 
+                // --- Engineers ---
+                req.method == "POST" && req.path == "/api/engineers" -> {
+                    val body = decodeJson<WebSaveEngineerReq>(req.body) ?: return badRequest()
+                    val existing = if (body.id != 0L) dao.getEngineerById(body.id) else null
+                    repo.saveEngineer(
+                        EngineerEntity(
+                            id = existing?.id ?: 0L,
+                            uuid = existing?.uuid ?: java.util.UUID.randomUUID().toString(),
+                            name = body.name.trim(),
+                            employeeCode = body.employeeCode.trim().uppercase(),
+                            role = body.role.trim().ifEmpty { "Maintenance Engineer" },
+                            shift = body.shift.trim().ifEmpty { "Day Shift" }
+                        )
+                    )
+                    jsonResponse(200, "OK", WebActionResult(true, "Engineer saved"))
+                }
+                req.method == "DELETE" && req.path.startsWith("/api/engineers/") -> {
+                    val id = req.path.removePrefix("/api/engineers/").toLongOrNull() ?: return badRequest()
+                    repo.deleteEngineer(id)
+                    jsonResponse(200, "OK", WebActionResult(true, "Engineer removed"))
+                }
+
                 // --- Maintenance Tasks ---
                 req.method == "POST" && req.path.startsWith("/api/tasks/") && req.path.endsWith("/complete") -> {
                     val idStr = req.path.removePrefix("/api/tasks/").removeSuffix("/complete")
@@ -427,6 +458,7 @@ object LocalWebServerManager {
                     repo.completeTask(
                         taskId = id,
                         personInCharge = body.personInCharge,
+                        assistantEngineers = body.assistantEngineers,
                         actualDurationMinutes = body.actualDurationMinutes,
                         notes = body.notes,
                         spareParts = body.spareParts.map {
@@ -442,12 +474,25 @@ object LocalWebServerManager {
                         flagMalfunction = body.flagMalfunction,
                         malfunctionSeverity = sev
                     )
-                    jsonResponse(200, "OK", WebActionResult(true, "Task completed & next cycle scheduled"))
+                    jsonResponse(200, "OK", WebActionResult(true, "Task completed & report generated"))
+                }
+                req.method == "POST" && req.path.startsWith("/api/tasks/") && req.path.endsWith("/reject") -> {
+                    val idStr = req.path.removePrefix("/api/tasks/").removeSuffix("/reject")
+                    val id = idStr.toLongOrNull() ?: return badRequest()
+                    val body = decodeJson<WebRejectTaskReq>(req.body) ?: return badRequest()
+                    repo.rejectTask(
+                        taskId = id,
+                        personInCharge = body.personInCharge,
+                        assistantEngineers = body.assistantEngineers,
+                        rejectionReason = body.rejectionReason,
+                        rescheduleNextCycle = body.rescheduleNextCycle
+                    )
+                    jsonResponse(200, "OK", WebActionResult(true, "Task rejected & report recorded"))
                 }
                 req.method == "POST" && req.path == "/api/tasks" -> {
                     val body = decodeJson<WebSaveTaskReq>(req.body) ?: return badRequest()
                     val existing = if (body.id != 0L) dao.getTaskById(body.id) else null
-                    val cadence = runCatching { Cadence.valueOf(body.cadence) }.getOrDefault(Cadence.DAILY)
+                    val cadence = runCatching { Cadence.valueOf(body.cadence) }.getOrDefault(Cadence.ONCE)
                     repo.saveTask(
                         MaintenanceTaskEntity(
                             id = existing?.id ?: 0L,
@@ -460,8 +505,9 @@ object LocalWebServerManager {
                             deadlineMillis = body.deadlineMillis,
                             estimatedMinutes = body.estimatedMinutes.coerceAtLeast(1),
                             personInCharge = body.personInCharge.trim(),
+                            assistantEngineers = body.assistantEngineers.trim(),
                             reminderEnabled = body.reminderEnabled,
-                            reminderLeadHours = body.reminderLeadHours,
+                            reminderLeadHours = body.reminderLeadHours.coerceAtLeast(1),
                             lastCompletedMillis = existing?.lastCompletedMillis
                         )
                     )
@@ -531,34 +577,7 @@ object LocalWebServerManager {
                     jsonResponse(200, "OK", WebActionResult(true, "Warehouse spare part deleted"))
                 }
 
-                // --- Service / Malfunction Logs ---
-                req.method == "POST" && req.path == "/api/logs" -> {
-                    val body = decodeJson<WebSaveLogReq>(req.body) ?: return badRequest()
-                    val type = runCatching { ServiceEntryType.valueOf(body.entryType) }.getOrDefault(ServiceEntryType.MALFUNCTION_REPAIR)
-                    val sev = runCatching { Severity.valueOf(body.severity) }.getOrDefault(Severity.HIGH)
-                    val newStatus = body.newMachineStatus?.let { runCatching { MachineStatus.valueOf(it) }.getOrNull() }
-                    repo.logServiceOrMalfunction(
-                        machineId = body.machineId,
-                        entryType = type,
-                        summaryTitle = body.summaryTitle,
-                        details = body.details,
-                        severity = sev,
-                        personInCharge = body.personInCharge.ifBlank { prefs.getSnapshot().defaultEngineerName },
-                        durationMinutes = body.durationMinutes,
-                        spareParts = body.spareParts.map {
-                            SparePartDraft(
-                                partName = it.partName.ifBlank { it.partCode },
-                                partCode = it.partCode,
-                                partDescription = it.partDescription,
-                                fromWarehouse = it.fromWarehouse,
-                                quantity = it.quantity.coerceAtLeast(1),
-                                unit = it.unit.ifBlank { "pcs" }
-                            )
-                        },
-                        newMachineStatus = newStatus
-                    )
-                    jsonResponse(200, "OK", WebActionResult(true, "Service log recorded"))
-                }
+                // --- Task History Logs (delete only; creation occurs automatically on Task Done / Reject) ---
                 req.method == "DELETE" && req.path.startsWith("/api/logs/") -> {
                     val id = req.path.removePrefix("/api/logs/").toLongOrNull() ?: return badRequest()
                     repo.deleteServiceLog(id)
@@ -576,6 +595,7 @@ object LocalWebServerManager {
                         personInCharge = req.query["personInCharge"]?.takeIf { it.isNotBlank() },
                         cadence = req.query["cadence"]?.let { runCatching { Cadence.valueOf(it) }.getOrNull() },
                         entryType = req.query["entryType"]?.let { runCatching { ServiceEntryType.valueOf(it) }.getOrNull() },
+                        outcome = req.query["outcome"]?.let { runCatching { TaskOutcome.valueOf(it) }.getOrNull() },
                         startMillis = req.query["startMillis"]?.toLongOrNull(),
                         endMillis = req.query["endMillis"]?.toLongOrNull()
                     )

@@ -144,6 +144,23 @@
       border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer;
     }
     .chip.active { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
+    .subtabs { display: flex; gap: 6px; border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+    .subtab {
+      padding: 7px 14px; border-radius: 9px; font-size: 13px; font-weight: 700;
+      border: 1px solid var(--border); background: var(--surface-alt); color: var(--text); cursor: pointer;
+    }
+    .subtab.active { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
+    .checkbox-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+      gap: 6px; padding: 8px; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--surface-alt); max-height: 150px; overflow-y: auto;
+    }
+    .checkbox-pill {
+      display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;
+      color: var(--text); margin: 0; cursor: pointer; padding: 4px 6px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    }
+    .checkbox-pill input { width: auto; margin: 0; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
     th { font-size: 11px; text-transform: uppercase; color: var(--muted); background: var(--surface-alt); }
@@ -154,7 +171,7 @@
     .modal-backdrop.open { display: flex; }
     .modal {
       background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
-      width: 100%; max-width: 620px; max-height: 90vh; display: flex; flex-direction: column; overflow: hidden;
+      width: 100%; max-width: 640px; max-height: 90vh; display: flex; flex-direction: column; overflow: hidden;
     }
     .modal-header { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
     .modal-body { padding: 16px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
@@ -184,10 +201,10 @@
       </div>
     </div>
     <div class="nav-list">
-      <button class="nav-btn active" data-tab="tasks" onclick="switchTab('tasks')">Tasks <span class="pill" id="nav-badge-tasks">0</span></button>
-      <button class="nav-btn" data-tab="todos" onclick="switchTab('todos')">To-Do <span class="pill" id="nav-badge-todos">0</span></button>
+      <button class="nav-btn active" data-tab="tasks" onclick="switchTab('tasks')">Tasks &amp; To-Do <span class="pill" id="nav-badge-tasks">0</span></button>
       <button class="nav-btn" data-tab="machines" onclick="switchTab('machines')">Machines <span class="pill" id="nav-badge-machines">0</span></button>
       <button class="nav-btn" data-tab="warehouse" onclick="switchTab('warehouse')">Warehouse Parts <span class="pill" id="nav-badge-parts">0</span></button>
+      <button class="nav-btn" data-tab="engineers" onclick="switchTab('engineers')">Engineers <span class="pill" id="nav-badge-engineers">0</span></button>
       <button class="nav-btn" data-tab="reports" onclick="switchTab('reports')">Reports &amp; Sync</button>
     </div>
     <div class="muted" style="margin-top:auto; padding: 6px;">
@@ -198,11 +215,11 @@
   <main class="main">
     <header class="topbar">
       <div>
-        <strong id="page-title">Maintenance Tasks</strong>
+        <strong id="page-title">Tasks, To-Dos &amp; History</strong>
         <span class="pill pill-ok" style="margin-left:8px;">ONLINE</span>
       </div>
       <div class="row">
-        <button onclick="openMalfunctionModal()">+ Log Malfunction / Service</button>
+        <button class="btn-primary" onclick="openTaskModal()">+ New Task</button>
         <button onclick="refreshState()">Refresh</button>
         <button onclick="toggleTheme()">Theme</button>
       </div>
@@ -212,7 +229,7 @@
       <div class="kpi"><div class="lbl">Machines</div><div class="val" id="kpi-machines">0</div></div>
       <div class="kpi"><div class="lbl">Overdue Tasks</div><div class="val" id="kpi-overdue" style="color:var(--danger)">0</div></div>
       <div class="kpi"><div class="lbl">Open To-Dos</div><div class="val" id="kpi-todos">0</div></div>
-      <div class="kpi"><div class="lbl">Warehouse Parts</div><div class="val" id="kpi-parts">0</div></div>
+      <div class="kpi"><div class="lbl">Engineers</div><div class="val" id="kpi-engineers">0</div></div>
       <div class="kpi"><div class="lbl">History Logs</div><div class="val" id="kpi-logs">0</div></div>
     </section>
 
@@ -238,17 +255,21 @@
 const appState = {
   data: null,
   tab: 'tasks',
+  taskSubTab: 'active',
   pin: localStorage.getItem('machina_pin') || '',
   taskCadence: 'ALL',
   taskOverdueOnly: false,
   taskSearch: '',
   todoRepeat: 'ALL',
   todoShowDone: false,
+  historyOutcome: 'ALL',
+  historySearch: '',
   machineStatus: 'ALL',
   machineSearch: '',
   selectedMachineId: null,
   partSearch: '',
-  reportFilter: { machineId: '', groupId: '', pic: '', cadence: '', entryType: '', start: '', end: '' },
+  engineerSearch: '',
+  reportFilter: { machineId: '', groupId: '', pic: '', cadence: '', outcome: '', start: '', end: '' },
   draftParts: []
 };
 
@@ -338,27 +359,30 @@ function updateKpis() {
   if (!d) return;
   const now = Date.now();
   const overdueTasks = d.tasks.filter(t => t.deadlineMillis < now).length;
+  const overdueTodos = d.todos.filter(td => !td.isCompleted && td.dueAtMillis < now).length;
   const openTodos = d.todos.filter(td => !td.isCompleted).length;
+  const engineersCount = (d.engineers || []).length;
+
   document.getElementById('kpi-machines').textContent = d.machines.length;
   document.getElementById('kpi-overdue').textContent = overdueTasks;
   document.getElementById('kpi-todos').textContent = openTodos;
-  document.getElementById('kpi-parts').textContent = d.warehouseParts.length;
+  document.getElementById('kpi-engineers').textContent = engineersCount;
   document.getElementById('kpi-logs').textContent = d.serviceLogs.length;
 
-  document.getElementById('nav-badge-tasks').textContent = overdueTasks || d.tasks.length;
-  document.getElementById('nav-badge-todos').textContent = openTodos;
+  document.getElementById('nav-badge-tasks').textContent = (overdueTasks + overdueTodos) || d.tasks.length;
   document.getElementById('nav-badge-machines').textContent = d.machines.length;
   document.getElementById('nav-badge-parts').textContent = d.warehouseParts.length;
+  document.getElementById('nav-badge-engineers').textContent = engineersCount;
 }
 
 function switchTab(tab) {
   appState.tab = tab;
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   const titles = {
-    tasks: 'Maintenance Tasks',
-    todos: 'Engineer To-Do Reminders',
+    tasks: 'Tasks, To-Dos & History',
     machines: 'Machines & Fleet History',
     warehouse: 'Warehouse Spare Parts Catalog',
+    engineers: 'Maintenance Engineers',
     reports: 'Reports, Excel/Backup Sync & Groups'
   };
   document.getElementById('page-title').textContent = titles[tab] || 'MachinaLog';
@@ -376,6 +400,20 @@ function toInputDateTime(ms) {
   return `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
 }
 
+function formatLeadTime(hours) {
+  const h = Math.max(1, Number(hours) || 24);
+  if (h >= 24 && h % 24 === 0) {
+    const days = h / 24;
+    return days === 1 ? '1 day' : `${days} days`;
+  }
+  return h === 1 ? '1 hour' : `${h} hours`;
+}
+
+function parseEngineerList(raw) {
+  if (!raw) return [];
+  return String(raw).split(',').map(s => s.trim()).filter(Boolean);
+}
+
 function byIdMap(list) {
   const m = {};
   (list || []).forEach(x => m[x.id] = x);
@@ -388,19 +426,83 @@ function statusPillHtml(status) {
   return `<span class="pill pill-ok">OPERATIONAL</span>`;
 }
 
+function outcomePillHtml(outcome) {
+  if (outcome === 'REJECTED') return `<span class="pill pill-danger">REJECTED</span>`;
+  return `<span class="pill pill-ok">DONE</span>`;
+}
+
+function buildEngineerSelectHtml(idAttr, engineers, preferredName, onchangeAttr = '') {
+  if (!engineers || engineers.length === 0) {
+    return `<select id="${idAttr}" ${onchangeAttr}><option value="">No registered engineers — add one in Engineers tab</option></select>`;
+  }
+  const match = engineers.find(e => e.name.toLowerCase() === String(preferredName || '').trim().toLowerCase());
+  const selectedName = match ? match.name : engineers[0].name;
+  return `<select id="${idAttr}" ${onchangeAttr}>${engineers.map(e =>
+    `<option value="${esc(e.name)}" ${e.name === selectedName ? 'selected' : ''}>${esc(e.name)}${e.employeeCode ? ' (' + esc(e.employeeCode) + ')' : ''}</option>`
+  ).join('')}</select>`;
+}
+
+function renderAssistantCheckboxesHtml(prefix, engineers, excludePic, selectedNames) {
+  const candidates = (engineers || []).filter(e => e.name.toLowerCase() !== String(excludePic || '').trim().toLowerCase());
+  if (candidates.length === 0) {
+    return `<div class="muted">No additional engineers available. Add more crew in the Engineers tab if needed.</div>`;
+  }
+  const selectedLower = new Set((selectedNames || []).map(s => s.toLowerCase()));
+  return candidates.map(e => `
+    <label class="checkbox-pill">
+      <input type="checkbox" value="${esc(e.name)}" ${selectedLower.has(e.name.toLowerCase()) ? 'checked' : ''} />
+      <span>${esc(e.name)}</span>
+    </label>
+  `).join('');
+}
+
+function syncAssistantBox(prefix) {
+  const picEl = document.getElementById(`${prefix}-pic`);
+  const boxEl = document.getElementById(`${prefix}-assistants-box`);
+  if (!picEl || !boxEl) return;
+  const currentlyChecked = Array.from(boxEl.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
+  boxEl.innerHTML = renderAssistantCheckboxesHtml(prefix, appState.data.engineers || [], picEl.value, currentlyChecked);
+}
+
+function getCheckedAssistants(prefix) {
+  const pic = document.getElementById(`${prefix}-pic`)?.value || '';
+  const boxEl = document.getElementById(`${prefix}-assistants-box`);
+  if (!boxEl) return [];
+  return Array.from(boxEl.querySelectorAll('input[type="checkbox"]:checked'))
+    .map(cb => cb.value)
+    .filter(name => name.toLowerCase() !== pic.toLowerCase());
+}
+
 function renderTab() {
   const d = appState.data;
   if (!d) return;
   const root = document.getElementById('view-root');
   if (appState.tab === 'tasks') renderTasks(root, d);
-  else if (appState.tab === 'todos') renderTodos(root, d);
   else if (appState.tab === 'machines') renderMachines(root, d);
   else if (appState.tab === 'warehouse') renderWarehouse(root, d);
+  else if (appState.tab === 'engineers') renderEngineers(root, d);
   else if (appState.tab === 'reports') renderReports(root, d);
 }
 
-// --- 1. TASKS ---
+// --- 1. UNIFIED TASKS, TO-DO REMINDERS & HISTORY ---
 function renderTasks(root, d) {
+  const openTodos = d.todos.filter(td => !td.isCompleted).length;
+  const subtabsHtml = `
+    <div class="subtabs">
+      <button class="subtab ${appState.taskSubTab==='active'?'active':''}" onclick="appState.taskSubTab='active'; renderTab()">Active Tasks (${d.tasks.length})</button>
+      <button class="subtab ${appState.taskSubTab==='todos'?'active':''}" onclick="appState.taskSubTab='todos'; renderTab()">To-Do Reminders (${openTodos})</button>
+      <button class="subtab ${appState.taskSubTab==='history'?'active':''}" onclick="appState.taskSubTab='history'; renderTab()">Task History (${d.serviceLogs.length})</button>
+    </div>`;
+
+  if (appState.taskSubTab === 'todos') {
+    root.innerHTML = `<div class="card">${subtabsHtml}${renderTodoSubTabHtml(d)}</div>`;
+    return;
+  }
+  if (appState.taskSubTab === 'history') {
+    root.innerHTML = `<div class="card">${subtabsHtml}${renderHistorySubTabHtml(d)}</div>`;
+    return;
+  }
+
   const mMap = byIdMap(d.machines);
   const gMap = byIdMap(d.groups);
   const now = Date.now();
@@ -410,7 +512,7 @@ function renderTasks(root, d) {
     if (appState.taskCadence !== 'ALL' && t.cadence !== appState.taskCadence) return false;
     if (appState.taskOverdueOnly && t.deadlineMillis >= now) return false;
     if (q) {
-      const hay = `${t.title} ${t.description} ${t.personInCharge} ${m?.assetCode || ''} ${m?.name || ''}`.toLowerCase();
+      const hay = `${t.title} ${t.description} ${t.personInCharge} ${t.assistantEngineers || ''} ${m?.assetCode || ''} ${m?.name || ''}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -418,9 +520,10 @@ function renderTasks(root, d) {
 
   root.innerHTML = `
     <div class="card">
+      ${subtabsHtml}
       <div class="between">
         <div class="row" style="flex:1; min-width:240px;">
-          <input style="max-width:320px;" placeholder="Search tasks, machine, PIC..." value="${esc(appState.taskSearch)}" oninput="appState.taskSearch=this.value; renderTab()" />
+          <input style="max-width:320px;" placeholder="Search tasks, machine, PIC, assistants..." value="${esc(appState.taskSearch)}" oninput="appState.taskSearch=this.value; renderTab()" />
           <label style="display:inline-flex;align-items:center;gap:6px;margin:0;cursor:pointer;">
             <input type="checkbox" style="width:auto;" ${appState.taskOverdueOnly ? 'checked' : ''} onchange="appState.taskOverdueOnly=this.checked; renderTab()" />
             Overdue Only
@@ -432,26 +535,34 @@ function renderTasks(root, d) {
         </div>
       </div>
       <div class="chip-row">
-        ${['ALL','DAILY','WEEKLY','MONTHLY','YEARLY'].map(c => `<button class="chip ${appState.taskCadence===c?'active':''}" onclick="appState.taskCadence='${c}'; renderTab()">${c}</button>`).join('')}
+        ${['ALL','ONCE','DAILY','WEEKLY','MONTHLY','YEARLY'].map(c => `<button class="chip ${appState.taskCadence===c?'active':''}" onclick="appState.taskCadence='${c}'; renderTab()">${c}</button>`).join('')}
       </div>
       <table>
-        <thead><tr><th>Cadence / Group</th><th>Machine</th><th>Task</th><th>Deadline</th><th>PIC</th><th>Est.</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Cadence / Group</th><th>Machine</th><th>Task</th><th>Deadline &amp; Reminder</th><th>Engineers</th><th>Est.</th><th>Actions</th></tr></thead>
         <tbody>
-          ${filtered.length === 0 ? `<tr><td colspan="7" class="muted">No tasks match the current filter.</td></tr>` :
+          ${filtered.length === 0 ? `<tr><td colspan="7" class="muted">No active tasks match the current filter.</td></tr>` :
             filtered.map(t => {
               const m = mMap[t.machineId];
               const g = gMap[t.groupId || m?.groupId];
               const overdue = t.deadlineMillis < now;
               return `<tr>
-                <td><span class="pill pill-primary">${esc(t.cadence)}</span>${g ? `<div class="muted" style="margin-top:4px;">${esc(g.name)}</div>` : ''}</td>
+                <td><span class="pill pill-primary">${esc(t.cadence)}</span>${t.cadence!=='ONCE' ? `<div class="muted" style="margin-top:3px;">Auto-repeats</div>`:''}${g ? `<div class="muted" style="margin-top:4px;">${esc(g.name)}</div>` : ''}</td>
                 <td><strong>${esc(m?.assetCode || '-')}</strong><div class="muted">${esc(m?.name || '')}</div></td>
                 <td><strong>${esc(t.title)}</strong><div class="muted">${esc(t.description)}</div></td>
-                <td><span class="pill ${overdue ? 'pill-danger' : 'pill-ok'}">${overdue ? 'OVERDUE' : 'ON SCHEDULE'}</span><div class="muted">${fmtDate(t.deadlineMillis)}</div></td>
-                <td>${esc(t.personInCharge)}</td>
+                <td>
+                  <span class="pill ${overdue ? 'pill-danger' : 'pill-ok'}">${overdue ? 'OVERDUE' : 'ON SCHEDULE'}</span>
+                  <div class="muted">${fmtDate(t.deadlineMillis)}</div>
+                  <div class="muted">${t.reminderEnabled ? `Remind ${esc(formatLeadTime(t.reminderLeadHours))} before` : 'Reminder off'}</div>
+                </td>
+                <td>
+                  <strong>${esc(t.personInCharge)}</strong>
+                  ${t.assistantEngineers ? `<div class="muted">+ ${esc(t.assistantEngineers)}</div>` : ''}
+                </td>
                 <td>${t.estimatedMinutes}m</td>
                 <td>
                   <div class="row">
                     <button class="btn-primary btn-sm" onclick="openCompleteTaskModal(${t.id})">Complete</button>
+                    <button class="btn-sm btn-danger" onclick="openRejectTaskModal(${t.id})">Reject</button>
                     <button class="btn-sm" onclick="openTaskModal(${t.id})">Edit</button>
                     <button class="btn-sm btn-danger" onclick="deleteTask(${t.id})">Del</button>
                   </div>
@@ -463,30 +574,162 @@ function renderTasks(root, d) {
     </div>`;
 }
 
-function openTaskModal(id = null) {
+function renderTodoSubTabHtml(d) {
+  const mMap = byIdMap(d.machines);
+  const filtered = d.todos.filter(td => {
+    if (!appState.todoShowDone && td.isCompleted) return false;
+    if (appState.todoRepeat !== 'ALL' && td.repeatRule !== appState.todoRepeat) return false;
+    return true;
+  });
+  return `
+    <div class="between">
+      <div class="row">
+        <label style="display:inline-flex;align-items:center;gap:6px;margin:0;cursor:pointer;">
+          <input type="checkbox" style="width:auto;" ${appState.todoShowDone?'checked':''} onchange="appState.todoShowDone=this.checked; renderTab()" /> Show Completed
+        </label>
+      </div>
+      <button class="btn-primary" onclick="openTodoModal()">+ New Reminder</button>
+    </div>
+    <div class="chip-row">
+      ${['ALL','ONCE','DAILY','WEEKLY','MONTHLY','YEARLY'].map(r => `<button class="chip ${appState.todoRepeat===r?'active':''}" onclick="appState.todoRepeat='${r}'; renderTab()">${r}</button>`).join('')}
+    </div>
+    <table>
+      <thead><tr><th>Done</th><th>Title</th><th>Repeat</th><th>Priority</th><th>Trigger Date</th><th>PIC</th><th>Actions</th></tr></thead>
+      <tbody>
+        ${filtered.length === 0 ? `<tr><td colspan="7" class="muted">No reminders found.</td></tr>` :
+          filtered.map(td => `<tr>
+            <td><input type="checkbox" style="width:auto;" ${td.isCompleted?'checked':''} onchange="toggleTodo(${td.id})" /></td>
+            <td><strong>${esc(td.title)}</strong><div class="muted">${esc(td.notes)} ${td.machineId && mMap[td.machineId] ? '· ' + esc(mMap[td.machineId].assetCode) : ''}</div></td>
+            <td><span class="pill pill-primary">${esc(td.repeatRule)}</span></td>
+            <td><span class="pill ${td.priority==='URGENT'?'pill-danger':td.priority==='HIGH'?'pill-warn':''}">${esc(td.priority)}</span></td>
+            <td>${fmtDate(td.dueAtMillis)}</td>
+            <td>${esc(td.personInCharge)}</td>
+            <td><div class="row"><button class="btn-sm" onclick="openTodoModal(${td.id})">Edit</button><button class="btn-sm btn-danger" onclick="deleteTodo(${td.id})">Del</button></div></td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function renderHistorySubTabHtml(d) {
+  const mMap = byIdMap(d.machines);
+  const q = appState.historySearch.trim().toLowerCase();
+  const filtered = d.serviceLogs.filter(l => {
+    if (appState.historyOutcome !== 'ALL' && l.outcome !== appState.historyOutcome) return false;
+    if (q) {
+      const m = mMap[l.machineId];
+      const partsHay = (l.parts || []).map(p => `${p.partCode} ${p.partName} ${p.partDescription}`).join(' ');
+      const hay = `${l.summaryTitle} ${l.malfunctionDetails} ${l.rejectionReason} ${l.personInCharge} ${l.assistantEngineers || ''} ${m?.assetCode || ''} ${m?.name || ''} ${partsHay}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  return `
+    <div class="between">
+      <input style="max-width:360px;" placeholder="Search completed or rejected tasks..." value="${esc(appState.historySearch)}" oninput="appState.historySearch=this.value; renderTab()" />
+      <span class="muted">Generated automatically when tasks are marked Done or Rejected</span>
+    </div>
+    <div class="chip-row">
+      ${['ALL','DONE','REJECTED'].map(o => `<button class="chip ${appState.historyOutcome===o?'active':''}" onclick="appState.historyOutcome='${o}'; renderTab()">${o === 'ALL' ? 'All Outcomes' : o}</button>`).join('')}
+    </div>
+    <table>
+      <thead><tr><th>Outcome</th><th>Machine</th><th>Task &amp; Details / Parts</th><th>Engineers</th><th>Recorded</th><th>Actions</th></tr></thead>
+      <tbody>
+        ${filtered.length === 0 ? `<tr><td colspan="6" class="muted">No historical records match the filter.</td></tr>` :
+          filtered.map(l => {
+            const m = mMap[l.machineId];
+            return `<tr>
+              <td>
+                ${outcomePillHtml(l.outcome)}
+                ${l.cadenceSnapshot ? `<div style="margin-top:4px;"><span class="pill pill-primary">${esc(l.cadenceSnapshot)}</span></div>` : ''}
+              </td>
+              <td><strong>${esc(m?.assetCode || '-')}</strong><div class="muted">${esc(m?.name || '')}</div></td>
+              <td>
+                <strong>${esc(l.summaryTitle)}</strong>
+                ${l.outcome === 'REJECTED' && l.rejectionReason ? `<div style="color:var(--danger);font-size:12px;margin-top:3px;">Rejection reason: ${esc(l.rejectionReason)}</div>` : ''}
+                ${l.malfunctionDetails ? `<div class="muted" style="margin-top:3px;">${esc(l.malfunctionDetails)}</div>` : ''}
+                ${l.parts.length ? `<div style="margin-top:5px;">${l.parts.map(p => `<span class="pill pill-primary" style="margin-right:4px;">${esc(p.partCode)} ${esc(p.partName)} ×${p.quantity} ${esc(p.unit)}</span>`).join('')}</div>` : ''}
+              </td>
+              <td>
+                <strong>${esc(l.personInCharge)}</strong>
+                ${l.assistantEngineers ? `<div class="muted">+ ${esc(l.assistantEngineers)}</div>` : ''}
+              </td>
+              <td><div>${fmtDate(l.completedAtMillis)}</div><div class="muted">${l.serviceDurationMinutes > 0 ? l.serviceDurationMinutes + 'm' : 'Rejected'}</div></td>
+              <td><button class="btn-sm btn-danger" onclick="deleteHistoryLog(${l.id})">Del</button></td>
+            </tr>`;
+          }).join('')}
+      </tbody>
+    </table>`;
+}
+
+async function deleteHistoryLog(id) {
+  if (!confirm('Delete this history log entry?')) return;
+  await apiJson(`/api/logs/${id}`, 'DELETE');
+  showToast('History entry deleted'); refreshState();
+}
+
+function openTaskModal(id = null, defaultMachineIdArg = null) {
   const d = appState.data;
   const t = id ? d.tasks.find(x => x.id === id) : null;
-  const defaultMachineId = t ? t.machineId : (d.machines[0]?.id || 0);
+  const engineers = d.engineers || [];
+  const defaultMachineId = t ? t.machineId : (defaultMachineIdArg || d.machines[0]?.id || 0);
+  const selectedCadence = t?.cadence || 'ONCE';
+  const rawLead = t?.reminderLeadHours ?? 24;
+  const useDays = rawLead >= 24 && rawLead % 24 === 0;
+  const leadNum = useDays ? (rawLead / 24) : rawLead;
+  const prefPic = t?.personInCharge || d.defaultEngineerName;
+  const activePic = engineers.find(e => e.name.toLowerCase() === String(prefPic || '').toLowerCase())?.name || engineers[0]?.name || '';
+  const selectedAst = parseEngineerList(t?.assistantEngineers || '');
+
   openModal(t ? 'Edit Maintenance Task' : 'New Maintenance Task', `
+    ${engineers.length === 0 ? `<div class="pill pill-danger" style="padding:8px 10px;">No registered engineers found. Add an engineer in the Engineers tab before saving.</div>` : ''}
     <div><label>Machine *</label><select id="t-machine">${d.machines.map(m => `<option value="${m.id}" ${m.id===defaultMachineId?'selected':''}>${esc(m.assetCode)} · ${esc(m.name)}</option>`).join('')}</select></div>
     <div><label>Custom Group</label><select id="t-group"><option value="">Use Machine's Group</option>${d.groups.map(g => `<option value="${g.id}" ${t?.groupId===g.id?'selected':''}>${esc(g.name)}</option>`).join('')}</select></div>
     <div><label>Task Title *</label><input id="t-title" value="${esc(t?.title || '')}" /></div>
     <div><label>Checklist / Description</label><textarea id="t-desc" rows="2">${esc(t?.description || '')}</textarea></div>
     <div class="grid-2">
-      <div><label>Cadence</label><select id="t-cadence">${['DAILY','WEEKLY','MONTHLY','YEARLY'].map(c => `<option ${t?.cadence===c?'selected':''}>${c}</option>`).join('')}</select></div>
+      <div>
+        <label>Repeat / Cadence</label>
+        <select id="t-cadence">${['ONCE','DAILY','WEEKLY','MONTHLY','YEARLY'].map(c => `<option value="${c}" ${selectedCadence===c?'selected':''}>${c === 'ONCE' ? 'ONCE (One-Time)' : c}</option>`).join('')}</select>
+        <div class="muted" style="margin-top:3px;">Repeatable tasks auto-recreate with their reminder when completed.</div>
+      </div>
       <div><label>Deadline</label><input id="t-deadline" type="datetime-local" value="${toInputDateTime(t?.deadlineMillis || (Date.now() + 8*3600*1000))}" /></div>
     </div>
+    <div style="border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--surface-alt);">
+      <div class="between" style="margin-bottom:6px;">
+        <strong>Deadline Reminder</strong>
+        <label style="display:inline-flex;align-items:center;gap:6px;margin:0;cursor:pointer;">
+          <input id="t-rem-enabled" type="checkbox" style="width:auto;" ${t?.reminderEnabled !== false ? 'checked' : ''} onchange="document.getElementById('t-rem-row').style.display=this.checked?'grid':'none'" />
+          Enable Reminder
+        </label>
+      </div>
+      <div id="t-rem-row" class="grid-2" style="display:${t?.reminderEnabled !== false ? 'grid' : 'none'};">
+        <div><label>Remind Before</label><input id="t-rem-val" type="number" min="1" value="${leadNum}" /></div>
+        <div><label>Unit</label><select id="t-rem-unit"><option value="HOURS" ${!useDays?'selected':''}>Hours before deadline</option><option value="DAYS" ${useDays?'selected':''}>Days before deadline</option></select></div>
+      </div>
+    </div>
     <div class="grid-2">
-      <div><label>Person In Charge</label><input id="t-pic" value="${esc(t?.personInCharge || d.defaultEngineerName)}" /></div>
+      <div><label>Person In Charge (Registered Only) *</label>${buildEngineerSelectHtml('t-pic', engineers, activePic, `onchange="syncAssistantBox('t')"`)}</div>
       <div><label>Est. Minutes</label><input id="t-est" type="number" value="${t?.estimatedMinutes || 30}" /></div>
+    </div>
+    <div>
+      <label>Assistant Engineers (Optional — multi-person service)</label>
+      <div id="t-assistants-box" class="checkbox-grid">${renderAssistantCheckboxesHtml('t', engineers, activePic, selectedAst)}</div>
     </div>
   `, `<button class="btn-primary" onclick="saveTask(${t ? t.id : 0})">Save Task</button>`);
 }
 
 async function saveTask(id) {
   const title = document.getElementById('t-title').value.trim();
+  const pic = document.getElementById('t-pic').value.trim();
   if (!title) return showToast('Task title is required');
+  if (!pic) return showToast('Select a registered engineer for PIC first');
   const dlStr = document.getElementById('t-deadline').value;
+  const remEnabled = document.getElementById('t-rem-enabled').checked;
+  const remVal = Math.max(1, Number(document.getElementById('t-rem-val').value) || 1);
+  const remUnit = document.getElementById('t-rem-unit').value;
+  const reminderLeadHours = remUnit === 'DAYS' ? remVal * 24 : remVal;
+
   await apiJson('/api/tasks', 'POST', {
     id,
     machineId: Number(document.getElementById('t-machine').value),
@@ -496,7 +739,10 @@ async function saveTask(id) {
     cadence: document.getElementById('t-cadence').value,
     deadlineMillis: dlStr ? new Date(dlStr).getTime() : Date.now(),
     estimatedMinutes: Number(document.getElementById('t-est').value) || 30,
-    personInCharge: document.getElementById('t-pic').value
+    personInCharge: pic,
+    assistantEngineers: getCheckedAssistants('t').join(', '),
+    reminderEnabled: remEnabled,
+    reminderLeadHours
   });
   closeModal(); showToast('Task saved'); refreshState();
 }
@@ -507,9 +753,8 @@ async function deleteTask(id) {
   showToast('Task deleted'); refreshState();
 }
 
-// --- SEARCHABLE WAREHOUSE PICKER IN TASK COMPLETION & MALFUNCTION ---
+// --- SEARCHABLE WAREHOUSE PICKER IN TASK COMPLETION ---
 function renderDraftPartsBlock() {
-  const d = appState.data;
   return `
     <div style="border:1px solid var(--border); border-radius:10px; padding:10px; background:var(--surface-alt);">
       <div class="between" style="margin-bottom:6px;">
@@ -593,14 +838,24 @@ function removeDraftPart(idx) {
 }
 
 function openCompleteTaskModal(taskId) {
-  const t = appState.data.tasks.find(x => x.id === taskId);
-  const m = appState.data.machines.find(x => x.id === t.machineId);
+  const d = appState.data;
+  const t = d.tasks.find(x => x.id === taskId);
+  const m = d.machines.find(x => x.id === t.machineId);
+  const engineers = d.engineers || [];
+  const activePic = engineers.find(e => e.name.toLowerCase() === String(t.personInCharge || '').toLowerCase())?.name || engineers[0]?.name || '';
+  const selectedAst = parseEngineerList(t.assistantEngineers || '');
   appState.draftParts = [];
-  openModal('Complete & Log Service', `
+
+  openModal('Complete Task & Generate Report', `
     <div><strong>${esc(t.title)}</strong> <span class="muted">(${esc(m?.assetCode || '')} ${esc(m?.name || '')})</span></div>
+    ${t.cadence !== 'ONCE' ? `<div class="pill pill-primary" style="padding:6px 10px;">Repeatable (${esc(t.cadence)}): next cycle &amp; reminder will auto-recreate upon completion.</div>` : ''}
     <div class="grid-2">
-      <div><label>Serviced By (PIC)</label><input id="ct-pic" value="${esc(t.personInCharge)}" /></div>
+      <div><label>Serviced By (PIC) *</label>${buildEngineerSelectHtml('ct-pic', engineers, activePic, `onchange="syncAssistantBox('ct')"`)}</div>
       <div><label>Actual Service Time (min)</label><input id="ct-min" type="number" value="${t.estimatedMinutes}" /></div>
+    </div>
+    <div>
+      <label>Assistant Engineers (if serviced by &gt;1 person)</label>
+      <div id="ct-assistants-box" class="checkbox-grid">${renderAssistantCheckboxesHtml('ct', engineers, activePic, selectedAst)}</div>
     </div>
     <div><label>Findings / Work Performed</label><textarea id="ct-notes" rows="2"></textarea></div>
     <div class="row">
@@ -610,65 +865,78 @@ function openCompleteTaskModal(taskId) {
       <select id="ct-sev" style="width:auto;"><option>LOW</option><option selected>MEDIUM</option><option>HIGH</option><option>CRITICAL</option></select>
     </div>
     <div id="draft-parts-wrap">${renderDraftPartsBlock()}</div>
-  `, `<button class="btn-primary" onclick="submitCompleteTask(${taskId})">Complete &amp; Schedule Next</button>`);
+  `, `<button class="btn-primary" onclick="submitCompleteTask(${taskId})">Complete &amp; Save Report</button>`);
   renderPickerResults();
 }
 
 async function submitCompleteTask(taskId) {
+  const pic = document.getElementById('ct-pic').value.trim();
+  if (!pic) return showToast('Select a registered engineer for PIC first');
   await apiJson(`/api/tasks/${taskId}/complete`, 'POST', {
-    personInCharge: document.getElementById('ct-pic').value,
+    personInCharge: pic,
+    assistantEngineers: getCheckedAssistants('ct'),
     actualDurationMinutes: Number(document.getElementById('ct-min').value) || 30,
     notes: document.getElementById('ct-notes').value,
     flagMalfunction: document.getElementById('ct-malf').checked,
     severity: document.getElementById('ct-sev').value,
     spareParts: appState.draftParts
   });
-  closeModal(); showToast('Service logged & next cycle scheduled'); refreshState();
+  closeModal(); showToast('Task completed & report generated'); refreshState();
 }
 
-// --- 2. TO-DO REMINDERS ---
-function renderTodos(root, d) {
-  const mMap = byIdMap(d.machines);
-  const filtered = d.todos.filter(td => {
-    if (!appState.todoShowDone && td.isCompleted) return false;
-    if (appState.todoRepeat !== 'ALL' && td.repeatRule !== appState.todoRepeat) return false;
-    return true;
+function openRejectTaskModal(taskId) {
+  const d = appState.data;
+  const t = d.tasks.find(x => x.id === taskId);
+  const m = d.machines.find(x => x.id === t.machineId);
+  const engineers = d.engineers || [];
+  const activePic = engineers.find(e => e.name.toLowerCase() === String(t.personInCharge || '').toLowerCase())?.name || engineers[0]?.name || '';
+  const selectedAst = parseEngineerList(t.assistantEngineers || '');
+  const quickReasons = ['Machine In Production', 'Awaiting Spare Parts', 'Unsafe / Locked Out', 'Duplicate Request'];
+
+  openModal('Reject Service Request', `
+    <div><strong style="color:var(--danger);">${esc(t.title)}</strong> <span class="muted">(${esc(m?.assetCode || '')} ${esc(m?.name || '')})</span></div>
+    <div class="muted">Rejecting automatically creates a Rejected entry in Machine History &amp; Reports.</div>
+    <div><label>Reviewed / Rejected By (PIC) *</label>${buildEngineerSelectHtml('rt-pic', engineers, activePic, `onchange="syncAssistantBox('rt')"`)}</div>
+    <div>
+      <label>Assistant Engineers (Optional)</label>
+      <div id="rt-assistants-box" class="checkbox-grid">${renderAssistantCheckboxesHtml('rt', engineers, activePic, selectedAst)}</div>
+    </div>
+    <div>
+      <label>Quick Reasons</label>
+      <div class="chip-row" style="margin:4px 0;">
+        ${quickReasons.map(r => `<button type="button" class="chip" onclick="document.getElementById('rt-reason').value='${esc(r)}'">${esc(r)}</button>`).join('')}
+      </div>
+    </div>
+    <div><label>Rejection Reason *</label><textarea id="rt-reason" rows="3" placeholder="Explain why servicing cannot proceed right now..."></textarea></div>
+    ${t.cadence !== 'ONCE' ? `
+      <label style="display:inline-flex;align-items:center;gap:6px;margin:0;cursor:pointer;">
+        <input id="rt-reschedule" type="checkbox" style="width:auto;" /> Skip this cycle &amp; schedule next ${esc(t.cadence)} occurrence
+      </label>` : ''}
+  `, `<button class="btn-danger" onclick="submitRejectTask(${taskId})">Reject &amp; Record Report</button>`);
+}
+
+async function submitRejectTask(taskId) {
+  const pic = document.getElementById('rt-pic').value.trim();
+  const reason = document.getElementById('rt-reason').value.trim();
+  if (!pic) return showToast('Select a registered engineer for PIC first');
+  if (!reason) return showToast('Please enter a rejection reason');
+  const reschedEl = document.getElementById('rt-reschedule');
+  await apiJson(`/api/tasks/${taskId}/reject`, 'POST', {
+    personInCharge: pic,
+    assistantEngineers: getCheckedAssistants('rt'),
+    rejectionReason: reason,
+    rescheduleNextCycle: Boolean(reschedEl && reschedEl.checked)
   });
-  root.innerHTML = `
-    <div class="card">
-      <div class="between">
-        <div class="row">
-          <label style="display:inline-flex;align-items:center;gap:6px;margin:0;cursor:pointer;">
-            <input type="checkbox" style="width:auto;" ${appState.todoShowDone?'checked':''} onchange="appState.todoShowDone=this.checked; renderTab()" /> Show Completed
-          </label>
-        </div>
-        <button class="btn-primary" onclick="openTodoModal()">+ New Reminder</button>
-      </div>
-      <div class="chip-row">
-        ${['ALL','ONCE','DAILY','WEEKLY','MONTHLY','YEARLY'].map(r => `<button class="chip ${appState.todoRepeat===r?'active':''}" onclick="appState.todoRepeat='${r}'; renderTab()">${r}</button>`).join('')}
-      </div>
-      <table>
-        <thead><tr><th>Done</th><th>Title</th><th>Repeat</th><th>Priority</th><th>Trigger Date</th><th>PIC</th><th>Actions</th></tr></thead>
-        <tbody>
-          ${filtered.length === 0 ? `<tr><td colspan="7" class="muted">No reminders found.</td></tr>` :
-            filtered.map(td => `<tr>
-              <td><input type="checkbox" style="width:auto;" ${td.isCompleted?'checked':''} onchange="toggleTodo(${td.id})" /></td>
-              <td><strong>${esc(td.title)}</strong><div class="muted">${esc(td.notes)} ${td.machineId && mMap[td.machineId] ? '· ' + esc(mMap[td.machineId].assetCode) : ''}</div></td>
-              <td><span class="pill pill-primary">${esc(td.repeatRule)}</span></td>
-              <td><span class="pill ${td.priority==='URGENT'?'pill-danger':td.priority==='HIGH'?'pill-warn':''}">${esc(td.priority)}</span></td>
-              <td>${fmtDate(td.dueAtMillis)}</td>
-              <td>${esc(td.personInCharge)}</td>
-              <td><div class="row"><button class="btn-sm" onclick="openTodoModal(${td.id})">Edit</button><button class="btn-sm btn-danger" onclick="deleteTodo(${td.id})">Del</button></div></td>
-            </tr>`).join('')}
-        </tbody>
-      </table>
-    </div>`;
+  closeModal(); showToast('Task rejected & recorded in history'); refreshState();
 }
 
 function openTodoModal(id = null) {
   const d = appState.data;
   const td = id ? d.todos.find(x => x.id === id) : null;
+  const engineers = d.engineers || [];
+  const activePic = engineers.find(e => e.name.toLowerCase() === String(td?.personInCharge || d.defaultEngineerName || '').toLowerCase())?.name || engineers[0]?.name || '';
   openModal(td ? 'Edit Reminder' : 'New Reminder', `
+    ${engineers.length === 0 ? `<div class="pill pill-danger" style="padding:8px 10px;">Add a registered engineer in the Engineers tab before saving reminders.</div>` : ''}
     <div><label>Reminder Title *</label><input id="td-title" value="${esc(td?.title || '')}" /></div>
     <div><label>Notes</label><textarea id="td-notes" rows="2">${esc(td?.notes || '')}</textarea></div>
     <div class="grid-2">
@@ -677,7 +945,7 @@ function openTodoModal(id = null) {
     </div>
     <div class="grid-2">
       <div><label>Trigger Date &amp; Time</label><input id="td-due" type="datetime-local" value="${toInputDateTime(td?.dueAtMillis || (Date.now()+4*3600*1000))}" /></div>
-      <div><label>PIC</label><input id="td-pic" value="${esc(td?.personInCharge || d.defaultEngineerName)}" /></div>
+      <div><label>PIC (Registered Only) *</label>${buildEngineerSelectHtml('td-pic', engineers, activePic)}</div>
     </div>
     <div><label>Linked Machine (Optional)</label><select id="td-machine"><option value="">None</option>${d.machines.map(m => `<option value="${m.id}" ${td?.machineId===m.id?'selected':''}>${esc(m.assetCode)} · ${esc(m.name)}</option>`).join('')}</select></div>
   `, `<button class="btn-primary" onclick="saveTodo(${td ? td.id : 0})">Save Reminder</button>`);
@@ -685,7 +953,9 @@ function openTodoModal(id = null) {
 
 async function saveTodo(id) {
   const title = document.getElementById('td-title').value.trim();
+  const pic = document.getElementById('td-pic').value.trim();
   if (!title) return showToast('Title is required');
+  if (!pic) return showToast('Select a registered engineer for PIC first');
   const dueStr = document.getElementById('td-due').value;
   await apiJson('/api/todos', 'POST', {
     id,
@@ -694,7 +964,7 @@ async function saveTodo(id) {
     repeatRule: document.getElementById('td-rule').value,
     priority: document.getElementById('td-prio').value,
     dueAtMillis: dueStr ? new Date(dueStr).getTime() : Date.now(),
-    personInCharge: document.getElementById('td-pic').value,
+    personInCharge: pic,
     machineId: document.getElementById('td-machine').value ? Number(document.getElementById('td-machine').value) : null
   });
   closeModal(); showToast('Reminder saved'); refreshState();
@@ -702,7 +972,7 @@ async function saveTodo(id) {
 async function toggleTodo(id) { await apiJson(`/api/todos/${id}/toggle`, 'POST'); showToast('Reminder updated'); refreshState(); }
 async function deleteTodo(id) { if (confirm('Delete reminder?')) { await apiJson(`/api/todos/${id}`, 'DELETE'); refreshState(); } }
 
-// --- 3. MACHINES ---
+// --- 2. MACHINES & AUTOMATED REPORTS ---
 function renderMachines(root, d) {
   const gMap = byIdMap(d.groups);
   const q = appState.machineSearch.trim().toLowerCase();
@@ -712,6 +982,7 @@ function renderMachines(root, d) {
     return true;
   });
   const sel = d.machines.find(m => m.id === appState.selectedMachineId) || filtered[0];
+  const selTasks = sel ? d.tasks.filter(t => t.machineId === sel.id) : [];
   const selLogs = sel ? d.serviceLogs.filter(l => l.machineId === sel.id) : [];
 
   root.innerHTML = `
@@ -740,7 +1011,7 @@ function renderMachines(root, d) {
       </div>
 
       <div class="card">
-        ${!sel ? `<div class="muted">Select a machine to view service history.</div>` : `
+        ${!sel ? `<div class="muted">Select a machine to view tasks &amp; automated history.</div>` : `
           <div class="between">
             <div>
               <span class="pill pill-primary">${esc(sel.assetCode)}</span> ${statusPillHtml(sel.status)}
@@ -749,27 +1020,47 @@ function renderMachines(root, d) {
               ${sel.notes ? `<p style="font-size:13px;margin:8px 0 0;">${esc(sel.notes)}</p>` : ''}
             </div>
             <div class="row">
-              <button class="btn-primary btn-sm" onclick="openMalfunctionModal(${sel.id})">+ Log Service/Malfunction</button>
+              <button class="btn-primary btn-sm" onclick="openTaskModal(null, ${sel.id})">+ New Task</button>
               <button class="btn-sm" onclick="openMachineModal(${sel.id})">Edit</button>
               <button class="btn-sm btn-danger" onclick="deleteMachine(${sel.id})">Delete</button>
             </div>
           </div>
           <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;" />
-          <strong>Service &amp; Malfunction History (${selLogs.length})</strong>
+          <strong>Active Tasks (${selTasks.length})</strong>
+          <div style="margin-top:8px;margin-bottom:14px;display:flex;flex-direction:column;gap:8px;">
+            ${selTasks.map(t => `
+              <div style="border:1px solid var(--border);border-radius:10px;padding:10px;">
+                <div class="between">
+                  <div>
+                    <span class="pill pill-primary">${esc(t.cadence)}</span>
+                    <strong>${esc(t.title)}</strong>
+                    <div class="muted">${fmtDate(t.deadlineMillis)} · PIC: ${esc(t.personInCharge)}${t.assistantEngineers ? ' (+ ' + esc(t.assistantEngineers) + ')' : ''}</div>
+                  </div>
+                  <div class="row">
+                    <button class="btn-primary btn-sm" onclick="openCompleteTaskModal(${t.id})">Complete</button>
+                    <button class="btn-sm btn-danger" onclick="openRejectTaskModal(${t.id})">Reject</button>
+                  </div>
+                </div>
+              </div>
+            `).join('') || `<div class="muted">No active tasks scheduled for this machine.</div>`}
+          </div>
+          <strong>Automated Task History &amp; Reports (${selLogs.length})</strong>
           <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;">
             ${selLogs.map(l => `
               <div style="border:1px solid var(--border);border-radius:10px;padding:10px;">
                 <div class="between">
                   <div>
-                    <span class="pill ${l.entryType==='MALFUNCTION_REPAIR'?'pill-danger':'pill-ok'}">${esc(l.entryType)}</span>
+                    ${outcomePillHtml(l.outcome)}
+                    <span class="pill">${esc(l.entryType)}</span>
                     <strong>${esc(l.summaryTitle)}</strong>
                   </div>
-                  <span class="muted">${fmtDate(l.completedAtMillis)} · ${l.serviceDurationMinutes}m · ${esc(l.personInCharge)}</span>
+                  <span class="muted">${fmtDate(l.completedAtMillis)} · ${l.serviceDurationMinutes > 0 ? l.serviceDurationMinutes + 'm · ' : ''}${esc(l.personInCharge)}${l.assistantEngineers ? ' (+ ' + esc(l.assistantEngineers) + ')' : ''}</span>
                 </div>
+                ${l.outcome === 'REJECTED' && l.rejectionReason ? `<div style="color:var(--danger);font-size:12px;margin-top:4px;">Rejection reason: ${esc(l.rejectionReason)}</div>` : ''}
                 ${l.malfunctionDetails ? `<div class="muted" style="margin-top:4px;">${esc(l.malfunctionDetails)}</div>` : ''}
                 ${l.parts.length ? `<div style="margin-top:6px;">${l.parts.map(p => `<span class="pill pill-primary" style="margin-right:4px;">${esc(p.partCode)} ${esc(p.partName)} ×${p.quantity} ${esc(p.unit)}</span>`).join('')}</div>` : ''}
               </div>
-            `).join('') || `<div class="muted">No service logs recorded for this machine yet.</div>`}
+            `).join('') || `<div class="muted">Reports appear automatically once a task is marked Done or Rejected.</div>`}
           </div>
         `}
       </div>
@@ -811,46 +1102,7 @@ async function saveMachine(id) {
 }
 async function deleteMachine(id) { if (confirm('Delete machine and all its tasks/history?')) { await apiJson(`/api/machines/${id}`, 'DELETE'); refreshState(); } }
 
-function openMalfunctionModal(machineId = null) {
-  const d = appState.data;
-  const defId = machineId || appState.selectedMachineId || (d.machines[0]?.id || 0);
-  appState.draftParts = [];
-  openModal('Log Malfunction / Service Report', `
-    <div><label>Machine *</label><select id="ml-machine">${d.machines.map(m => `<option value="${m.id}" ${m.id===defId?'selected':''}>${esc(m.assetCode)} · ${esc(m.name)}</option>`).join('')}</select></div>
-    <div class="grid-2">
-      <div><label>Entry Type</label><select id="ml-type"><option value="MALFUNCTION_REPAIR">Malfunction / Breakdown</option><option value="PREVENTIVE_SERVICE">Preventive Service</option></select></div>
-      <div><label>Severity</label><select id="ml-sev"><option>LOW</option><option>MEDIUM</option><option selected>HIGH</option><option>CRITICAL</option></select></div>
-    </div>
-    <div><label>Summary Title *</label><input id="ml-title" placeholder="e.g. Hydraulic leak on relief block" /></div>
-    <div><label>Details / Root Cause</label><textarea id="ml-details" rows="2"></textarea></div>
-    <div class="grid-2">
-      <div><label>Person In Charge</label><input id="ml-pic" value="${esc(d.defaultEngineerName)}" /></div>
-      <div><label>Duration (min)</label><input id="ml-min" type="number" value="45" /></div>
-    </div>
-    <div><label>Machine Status After Log</label><select id="ml-status"><option value="OPERATIONAL">Operational</option><option value="MAINTENANCE_DUE">Maint. Due</option><option value="MALFUNCTION">Malfunction</option></select></div>
-    <div id="draft-parts-wrap">${renderDraftPartsBlock()}</div>
-  `, `<button class="btn-primary" onclick="submitMalfunctionLog()">Save Report</button>`);
-  renderPickerResults();
-}
-
-async function submitMalfunctionLog() {
-  const title = document.getElementById('ml-title').value.trim();
-  if (!title) return showToast('Summary title is required');
-  await apiJson('/api/logs', 'POST', {
-    machineId: Number(document.getElementById('ml-machine').value),
-    entryType: document.getElementById('ml-type').value,
-    severity: document.getElementById('ml-sev').value,
-    summaryTitle: title,
-    details: document.getElementById('ml-details').value,
-    personInCharge: document.getElementById('ml-pic').value,
-    durationMinutes: Number(document.getElementById('ml-min').value) || 30,
-    newMachineStatus: document.getElementById('ml-status').value,
-    spareParts: appState.draftParts
-  });
-  closeModal(); showToast('Service report saved'); refreshState();
-}
-
-// --- 4. WAREHOUSE SPARE PARTS ---
+// --- 3. WAREHOUSE SPARE PARTS ---
 function renderWarehouse(root, d) {
   const tokens = appState.partSearch.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const filtered = d.warehouseParts.filter(w => {
@@ -912,10 +1164,87 @@ async function saveWarehousePart(id) {
 }
 async function deleteWarehousePart(id) { if (confirm('Remove this spare part from catalog?')) { await apiJson(`/api/warehouse/${id}`, 'DELETE'); refreshState(); } }
 
+// --- 4. ENGINEERS ROSTER ---
+function renderEngineers(root, d) {
+  const engineers = d.engineers || [];
+  const q = appState.engineerSearch.trim().toLowerCase();
+  const filtered = engineers.filter(e => {
+    if (!q) return true;
+    return `${e.name} ${e.employeeCode} ${e.role} ${e.shift}`.toLowerCase().includes(q);
+  });
+
+  root.innerHTML = `
+    <div class="card">
+      <div class="between" style="margin-bottom:10px;">
+        <div>
+          <strong>Registered Maintenance Engineers (${filtered.length})</strong>
+          <div class="muted">Only engineers listed here can be assigned as PIC or Assistants</div>
+        </div>
+        <button class="btn-primary" onclick="openEngineerModal()">+ Add Engineer</button>
+      </div>
+      <input style="margin-bottom:10px;" placeholder="Search by name, employee ID, role, shift..." value="${esc(appState.engineerSearch)}" oninput="appState.engineerSearch=this.value; renderTab()" />
+      <table>
+        <thead><tr><th>Engineer</th><th>Employee ID</th><th>Role</th><th>Shift</th><th>Active Tasks</th><th>History</th><th>Actions</th></tr></thead>
+        <tbody>
+          ${filtered.length === 0 ? `<tr><td colspan="7" class="muted">No engineers match the search.</td></tr>` :
+            filtered.map(e => {
+              const lower = e.name.toLowerCase();
+              const activeCount = d.tasks.filter(t => t.personInCharge.toLowerCase() === lower || parseEngineerList(t.assistantEngineers).some(a => a.toLowerCase() === lower)).length;
+              const histCount = d.serviceLogs.filter(l => l.personInCharge.toLowerCase() === lower || parseEngineerList(l.assistantEngineers).some(a => a.toLowerCase() === lower)).length;
+              return `<tr>
+                <td><strong>${esc(e.name)}</strong></td>
+                <td>${e.employeeCode ? `<span class="pill pill-primary">${esc(e.employeeCode)}</span>` : '-'}</td>
+                <td>${esc(e.role)}</td>
+                <td><span class="pill">${esc(e.shift)}</span></td>
+                <td>${activeCount}</td>
+                <td>${histCount}</td>
+                <td><div class="row"><button class="btn-sm" onclick="openEngineerModal(${e.id})">Edit</button><button class="btn-sm btn-danger" onclick="deleteEngineer(${e.id})">Del</button></div></td>
+              </tr>`;
+            }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function openEngineerModal(id = null) {
+  const e = id ? (appState.data.engineers || []).find(x => x.id === id) : null;
+  openModal(e ? 'Edit Engineer' : 'Add Maintenance Engineer', `
+    <div><label>Full Name *</label><input id="eng-name" value="${esc(e?.name || '')}" placeholder="e.g. Elena Vance" /></div>
+    <div class="grid-2">
+      <div><label>Employee Code / Badge</label><input id="eng-code" value="${esc(e?.employeeCode || '')}" placeholder="e.g. ENG-014" /></div>
+      <div><label>Shift</label><select id="eng-shift">${['Day Shift','Night Shift','Swing Shift','On-Call'].map(s => `<option ${e?.shift===s?'selected':''}>${s}</option>`).join('')}</select></div>
+    </div>
+    <div><label>Role / Specialty</label><input id="eng-role" value="${esc(e?.role || 'Maintenance Engineer')}" /></div>
+  `, `<button class="btn-primary" onclick="saveEngineer(${e ? e.id : 0})">Save Engineer</button>`);
+}
+
+async function saveEngineer(id) {
+  const name = document.getElementById('eng-name').value.trim();
+  if (!name) return showToast('Engineer name is required');
+  await apiJson('/api/engineers', 'POST', {
+    id,
+    name,
+    employeeCode: document.getElementById('eng-code').value.trim().toUpperCase(),
+    role: document.getElementById('eng-role').value.trim() || 'Maintenance Engineer',
+    shift: document.getElementById('eng-shift').value
+  });
+  closeModal(); showToast('Engineer saved'); refreshState();
+}
+
+async function deleteEngineer(id) {
+  if (!confirm('Remove this engineer from the active roster?')) return;
+  await apiJson(`/api/engineers/${id}`, 'DELETE');
+  showToast('Engineer removed'); refreshState();
+}
+
 // --- 5. REPORTS, EXCEL/BACKUP SYNC & GROUPS ---
 function renderReports(root, d) {
   const rf = appState.reportFilter;
-  const pics = [...new Set([...d.tasks.map(t=>t.personInCharge), ...d.serviceLogs.map(l=>l.personInCharge)].filter(Boolean))].sort();
+  const pics = [...new Set([
+    ...(d.engineers || []).map(e => e.name),
+    ...d.tasks.map(t => t.personInCharge),
+    ...d.serviceLogs.map(l => l.personInCharge)
+  ].filter(Boolean))].sort();
   const qs = buildReportQuery();
 
   root.innerHTML = `
@@ -927,7 +1256,9 @@ function renderReports(root, d) {
           <div><label>Machine</label><select id="rf-m" onchange="appState.reportFilter.machineId=this.value; renderTab()"><option value="">All Machines</option>${d.machines.map(m=>`<option value="${m.id}" ${rf.machineId==m.id?'selected':''}>${esc(m.assetCode)} · ${esc(m.name)}</option>`).join('')}</select></div>
           <div><label>Custom Group</label><select id="rf-g" onchange="appState.reportFilter.groupId=this.value; renderTab()"><option value="">All Groups</option>${d.groups.map(g=>`<option value="${g.id}" ${rf.groupId==g.id?'selected':''}>${esc(g.name)}</option>`).join('')}</select></div>
           <div><label>Person In Charge</label><select id="rf-p" onchange="appState.reportFilter.pic=this.value; renderTab()"><option value="">All Engineers</option>${pics.map(p=>`<option ${rf.pic===p?'selected':''}>${esc(p)}</option>`).join('')}</select></div>
-          <div><label>Cadence</label><select id="rf-c" onchange="appState.reportFilter.cadence=this.value; renderTab()"><option value="">All Cadences</option>${['DAILY','WEEKLY','MONTHLY','YEARLY'].map(c=>`<option ${rf.cadence===c?'selected':''}>${c}</option>`).join('')}</select></div>
+          <div><label>Cadence</label><select id="rf-c" onchange="appState.reportFilter.cadence=this.value; renderTab()"><option value="">All Cadences</option>${['ONCE','DAILY','WEEKLY','MONTHLY','YEARLY'].map(c=>`<option ${rf.cadence===c?'selected':''}>${c}</option>`).join('')}</select></div>
+          <div><label>Task Outcome</label><select id="rf-o" onchange="appState.reportFilter.outcome=this.value; renderTab()"><option value="">All Outcomes</option><option value="DONE" ${rf.outcome==='DONE'?'selected':''}>Done Only</option><option value="REJECTED" ${rf.outcome==='REJECTED'?'selected':''}>Rejected Only</option></select></div>
+          <div></div>
           <div><label>From Date</label><input type="date" value="${esc(rf.start)}" onchange="appState.reportFilter.start=this.value; renderTab()" /></div>
           <div><label>To Date</label><input type="date" value="${esc(rf.end)}" onchange="appState.reportFilter.end=this.value; renderTab()" /></div>
         </div>
@@ -981,6 +1312,7 @@ function buildReportQuery() {
   if (rf.groupId) p.set('customGroupId', rf.groupId);
   if (rf.pic) p.set('personInCharge', rf.pic);
   if (rf.cadence) p.set('cadence', rf.cadence);
+  if (rf.outcome) p.set('outcome', rf.outcome);
   if (rf.start) p.set('startMillis', String(new Date(rf.start + 'T00:00:00').getTime()));
   if (rf.end) p.set('endMillis', String(new Date(rf.end + 'T23:59:59').getTime()));
   return p.toString();

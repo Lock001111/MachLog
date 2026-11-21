@@ -8,6 +8,7 @@ import com.example.data.AppDatabase
 import com.example.data.AppPreferences
 import com.example.data.Cadence
 import com.example.data.CustomGroupEntity
+import com.example.data.EngineerEntity
 import com.example.data.GroupScope
 import com.example.data.MachinaDao
 import com.example.data.MachineEntity
@@ -19,8 +20,10 @@ import com.example.data.ServiceEntryType
 import com.example.data.ServiceLogEntity
 import com.example.data.Severity
 import com.example.data.SparePartUsedEntity
+import com.example.data.TaskOutcome
 import com.example.data.TodoReminderEntity
 import com.example.data.WarehousePartEntity
+import com.example.data.parseEngineerList
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -57,16 +60,17 @@ data class MachineBackupDto(
 data class TaskBackupDto(
     val uuid: String,
     val machineUuid: String,
-    val groupUuid: String?,
+    val groupUuid: String? = null,
     val title: String,
-    val description: String,
+    val description: String = "",
     val cadence: String,
     val deadlineMillis: Long,
-    val estimatedMinutes: Int,
+    val estimatedMinutes: Int = 30,
     val personInCharge: String,
-    val reminderEnabled: Boolean,
-    val reminderLeadHours: Int,
-    val lastCompletedMillis: Long?,
+    val assistantEngineers: String = "",
+    val reminderEnabled: Boolean = true,
+    val reminderLeadHours: Int = 24,
+    val lastCompletedMillis: Long? = null,
     val updatedAtMillis: Long
 )
 
@@ -74,16 +78,16 @@ data class TaskBackupDto(
 data class TodoBackupDto(
     val uuid: String,
     val title: String,
-    val notes: String,
-    val machineUuid: String?,
-    val groupUuid: String?,
-    val personInCharge: String,
+    val notes: String = "",
+    val machineUuid: String? = null,
+    val groupUuid: String? = null,
+    val personInCharge: String = "",
     val repeatRule: String,
     val dueAtMillis: Long,
-    val reminderEnabled: Boolean,
-    val isCompleted: Boolean,
-    val priority: String,
-    val completedAtMillis: Long?,
+    val reminderEnabled: Boolean = true,
+    val isCompleted: Boolean = false,
+    val priority: String = "NORMAL",
+    val completedAtMillis: Long? = null,
     val updatedAtMillis: Long
 )
 
@@ -102,18 +106,21 @@ data class SparePartBackupDto(
 data class ServiceLogBackupDto(
     val uuid: String,
     val machineUuid: String,
-    val taskUuid: String?,
+    val taskUuid: String? = null,
     val entryType: String,
-    val cadenceSnapshot: String?,
+    val cadenceSnapshot: String? = null,
     val summaryTitle: String,
-    val malfunctionDetails: String,
-    val severity: String,
+    val malfunctionDetails: String = "",
+    val severity: String = "LOW",
+    val outcome: String = "DONE",
+    val rejectionReason: String = "",
     val personInCharge: String,
-    val serviceDurationMinutes: Int,
+    val assistantEngineers: String = "",
+    val serviceDurationMinutes: Int = 0,
     val completedAtMillis: Long,
-    val deadlineWasMet: Boolean,
+    val deadlineWasMet: Boolean = true,
     val updatedAtMillis: Long,
-    val spareParts: List<SparePartBackupDto>
+    val spareParts: List<SparePartBackupDto> = emptyList()
 )
 
 @JsonClass(generateAdapter = true)
@@ -127,8 +134,18 @@ data class WarehousePartBackupDto(
 )
 
 @JsonClass(generateAdapter = true)
+data class EngineerBackupDto(
+    val uuid: String,
+    val name: String,
+    val employeeCode: String = "",
+    val role: String = "Maintenance Engineer",
+    val shift: String = "Day Shift",
+    val updatedAtMillis: Long
+)
+
+@JsonClass(generateAdapter = true)
 data class PortableBackupPackage(
-    val schemaVersion: Int = 1,
+    val schemaVersion: Int = 2,
     val exportedAtMillis: Long,
     val deviceLabel: String,
     val groups: List<GroupBackupDto>,
@@ -136,7 +153,8 @@ data class PortableBackupPackage(
     val tasks: List<TaskBackupDto>,
     val todos: List<TodoBackupDto>,
     val serviceLogs: List<ServiceLogBackupDto>,
-    val warehouseParts: List<WarehousePartBackupDto> = emptyList()
+    val warehouseParts: List<WarehousePartBackupDto> = emptyList(),
+    val engineers: List<EngineerBackupDto> = emptyList()
 )
 
 object BackupSyncManager {
@@ -154,13 +172,14 @@ object BackupSyncManager {
         val todos = dao.getAllTodosSync()
         val logsWithParts = dao.getAllServiceLogsWithPartsSync()
         val warehouseParts = dao.getAllWarehousePartsSync()
+        val engineers = dao.getAllEngineersSync()
 
         val groupUuidById = groups.associate { it.id to it.uuid }
         val machineUuidById = machines.associate { it.id to it.uuid }
         val taskUuidById = tasks.associate { it.id to it.uuid }
 
         return PortableBackupPackage(
-            schemaVersion = 1,
+            schemaVersion = 2,
             exportedAtMillis = System.currentTimeMillis(),
             deviceLabel = "${Build.MANUFACTURER} ${Build.MODEL}",
             groups = groups.map {
@@ -196,6 +215,7 @@ object BackupSyncManager {
                     deadlineMillis = it.deadlineMillis,
                     estimatedMinutes = it.estimatedMinutes,
                     personInCharge = it.personInCharge,
+                    assistantEngineers = it.assistantEngineers,
                     reminderEnabled = it.reminderEnabled,
                     reminderLeadHours = it.reminderLeadHours,
                     lastCompletedMillis = it.lastCompletedMillis,
@@ -230,7 +250,10 @@ object BackupSyncManager {
                     summaryTitle = l.summaryTitle,
                     malfunctionDetails = l.malfunctionDetails,
                     severity = l.severity.name,
+                    outcome = l.outcome.name,
+                    rejectionReason = l.rejectionReason,
                     personInCharge = l.personInCharge,
+                    assistantEngineers = l.assistantEngineers,
                     serviceDurationMinutes = l.serviceDurationMinutes,
                     completedAtMillis = l.completedAtMillis,
                     deadlineWasMet = l.deadlineWasMet,
@@ -256,6 +279,16 @@ object BackupSyncManager {
                     partDescription = w.partDescription,
                     defaultUnit = w.defaultUnit,
                     updatedAtMillis = w.updatedAtMillis
+                )
+            },
+            engineers = engineers.map { e ->
+                EngineerBackupDto(
+                    uuid = e.uuid,
+                    name = e.name,
+                    employeeCode = e.employeeCode,
+                    role = e.role,
+                    shift = e.shift,
+                    updatedAtMillis = e.updatedAtMillis
                 )
             }
         )
@@ -380,6 +413,7 @@ object BackupSyncManager {
                         deadlineMillis = t.deadlineMillis,
                         estimatedMinutes = t.estimatedMinutes,
                         personInCharge = t.personInCharge,
+                        assistantEngineers = t.assistantEngineers,
                         reminderEnabled = t.reminderEnabled,
                         reminderLeadHours = t.reminderLeadHours,
                         lastCompletedMillis = t.lastCompletedMillis,
@@ -398,6 +432,7 @@ object BackupSyncManager {
                         deadlineMillis = t.deadlineMillis,
                         estimatedMinutes = t.estimatedMinutes,
                         personInCharge = t.personInCharge,
+                        assistantEngineers = t.assistantEngineers,
                         reminderEnabled = t.reminderEnabled,
                         reminderLeadHours = t.reminderLeadHours,
                         lastCompletedMillis = t.lastCompletedMillis,
@@ -460,6 +495,7 @@ object BackupSyncManager {
                 .getOrDefault(ServiceEntryType.PREVENTIVE_SERVICE)
             val cadenceSnap = lg.cadenceSnapshot?.let { runCatching { Cadence.valueOf(it) }.getOrNull() }
             val severity = runCatching { Severity.valueOf(lg.severity) }.getOrDefault(Severity.LOW)
+            val outcome = runCatching { TaskOutcome.valueOf(lg.outcome) }.getOrDefault(TaskOutcome.DONE)
 
             val existing = existingLogs[lg.uuid]
             if (existing == null) {
@@ -472,7 +508,10 @@ object BackupSyncManager {
                     summaryTitle = lg.summaryTitle,
                     malfunctionDetails = lg.malfunctionDetails,
                     severity = severity,
+                    outcome = outcome,
+                    rejectionReason = lg.rejectionReason,
                     personInCharge = lg.personInCharge,
+                    assistantEngineers = lg.assistantEngineers,
                     serviceDurationMinutes = lg.serviceDurationMinutes,
                     completedAtMillis = lg.completedAtMillis,
                     deadlineWasMet = lg.deadlineWasMet,
@@ -500,7 +539,10 @@ object BackupSyncManager {
                     summaryTitle = lg.summaryTitle,
                     malfunctionDetails = lg.malfunctionDetails,
                     severity = severity,
+                    outcome = outcome,
+                    rejectionReason = lg.rejectionReason,
                     personInCharge = lg.personInCharge,
+                    assistantEngineers = lg.assistantEngineers,
                     serviceDurationMinutes = lg.serviceDurationMinutes,
                     completedAtMillis = lg.completedAtMillis,
                     deadlineWasMet = lg.deadlineWasMet,
@@ -549,6 +591,58 @@ object BackupSyncManager {
                         updatedAtMillis = w.updatedAtMillis
                     )
                 )
+            }
+        }
+
+        val existingEngineersByUuid = dao.getAllEngineersSync().associateBy { it.uuid }.toMutableMap()
+        val existingEngineerLowerNames = existingEngineersByUuid.values.map { it.name.trim().lowercase() }.toMutableSet()
+
+        for (e in pkg.engineers) {
+            val existing = existingEngineersByUuid[e.uuid]
+            if (existing == null && e.name.trim().lowercase() !in existingEngineerLowerNames) {
+                val inserted = EngineerEntity(
+                    uuid = e.uuid,
+                    name = e.name.trim(),
+                    employeeCode = e.employeeCode.trim().uppercase(),
+                    role = e.role.trim().ifEmpty { "Maintenance Engineer" },
+                    shift = e.shift.trim().ifEmpty { "Day Shift" },
+                    updatedAtMillis = e.updatedAtMillis
+                )
+                val id = dao.insertEngineer(inserted)
+                val saved = inserted.copy(id = id)
+                existingEngineersByUuid[e.uuid] = saved
+                existingEngineerLowerNames += saved.name.lowercase()
+            } else if (existing != null && e.updatedAtMillis > existing.updatedAtMillis) {
+                val updated = existing.copy(
+                    name = e.name.trim(),
+                    employeeCode = e.employeeCode.trim().uppercase(),
+                    role = e.role.trim().ifEmpty { "Maintenance Engineer" },
+                    shift = e.shift.trim().ifEmpty { "Day Shift" },
+                    updatedAtMillis = e.updatedAtMillis
+                )
+                dao.updateEngineer(updated)
+                existingEngineersByUuid[e.uuid] = updated
+                existingEngineerLowerNames += updated.name.lowercase()
+            }
+        }
+
+        // Backfill engineers referenced in tasks/todos/logs when restoring legacy schemaVersion=1 backups
+        val referencedNames = buildSet {
+            pkg.tasks.forEach { t ->
+                if (t.personInCharge.isNotBlank()) add(t.personInCharge.trim())
+                parseEngineerList(t.assistantEngineers).forEach { add(it) }
+            }
+            pkg.todos.forEach { td -> if (td.personInCharge.isNotBlank()) add(td.personInCharge.trim()) }
+            pkg.serviceLogs.forEach { lg ->
+                if (lg.personInCharge.isNotBlank()) add(lg.personInCharge.trim())
+                parseEngineerList(lg.assistantEngineers).forEach { add(it) }
+            }
+        }
+        val now = System.currentTimeMillis()
+        for (refName in referencedNames) {
+            if (refName.lowercase() !in existingEngineerLowerNames) {
+                dao.insertEngineer(EngineerEntity(name = refName, updatedAtMillis = now))
+                existingEngineerLowerNames += refName.lowercase()
             }
         }
 

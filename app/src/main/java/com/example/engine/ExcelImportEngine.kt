@@ -5,6 +5,7 @@ import android.net.Uri
 import com.example.data.AppPreferences
 import com.example.data.Cadence
 import com.example.data.CustomGroupEntity
+import com.example.data.EngineerEntity
 import com.example.data.GroupScope
 import com.example.data.MachinaDao
 import com.example.data.MachineEntity
@@ -14,6 +15,7 @@ import com.example.data.ReminderPriority
 import com.example.data.RepeatRule
 import com.example.data.TodoReminderEntity
 import com.example.data.WarehousePartEntity
+import com.example.data.parseEngineerList
 import org.xml.sax.Attributes
 import org.xml.sax.helpers.DefaultHandler
 import java.io.ByteArrayInputStream
@@ -52,8 +54,10 @@ data class ImportedTaskRow(
     val deadlineMillis: Long,
     val estimatedMinutes: Int,
     val personInCharge: String,
+    val assistantEngineers: String = "",
     val groupName: String,
     val reminderEnabled: Boolean,
+    val reminderLeadHours: Int = 24,
     val hasExplicitDeadline: Boolean = true
 )
 
@@ -373,7 +377,9 @@ object ExcelImportEngine {
                         t.description.trim() != ex.description.trim() ||
                         t.estimatedMinutes.coerceAtLeast(1) != ex.estimatedMinutes ||
                         t.personInCharge.trim() != ex.personInCharge.trim() ||
-                        t.reminderEnabled != ex.reminderEnabled
+                        t.assistantEngineers.trim() != ex.assistantEngineers.trim() ||
+                        t.reminderEnabled != ex.reminderEnabled ||
+                        t.reminderLeadHours != ex.reminderLeadHours
                     if (changed) tUpd++ else tSkip++
                 }
             }
@@ -606,7 +612,9 @@ object ExcelImportEngine {
                     deadlineMillis = t.deadlineMillis,
                     estimatedMinutes = t.estimatedMinutes.coerceAtLeast(1),
                     personInCharge = t.personInCharge.trim(),
+                    assistantEngineers = t.assistantEngineers.trim(),
                     reminderEnabled = t.reminderEnabled,
+                    reminderLeadHours = t.reminderLeadHours.coerceAtLeast(1),
                     updatedAtMillis = now
                 )
                 val id = dao.insertTask(entity)
@@ -623,7 +631,9 @@ object ExcelImportEngine {
                     t.description.trim() != existing.description.trim() ||
                     t.estimatedMinutes.coerceAtLeast(1) != existing.estimatedMinutes ||
                     t.personInCharge.trim() != existing.personInCharge.trim() ||
-                    t.reminderEnabled != existing.reminderEnabled
+                    t.assistantEngineers.trim() != existing.assistantEngineers.trim() ||
+                    t.reminderEnabled != existing.reminderEnabled ||
+                    t.reminderLeadHours != existing.reminderLeadHours
 
                 if (changed) {
                     val gid = if (t.groupName.isNotBlank()) ensureGroupId(t.groupName) else existing.groupId
@@ -633,7 +643,9 @@ object ExcelImportEngine {
                         deadlineMillis = if (t.hasExplicitDeadline) t.deadlineMillis else existing.deadlineMillis,
                         estimatedMinutes = t.estimatedMinutes.coerceAtLeast(1),
                         personInCharge = t.personInCharge.trim(),
+                        assistantEngineers = t.assistantEngineers.trim(),
                         reminderEnabled = t.reminderEnabled,
+                        reminderLeadHours = t.reminderLeadHours.coerceAtLeast(1),
                         updatedAtMillis = now
                     )
                     dao.updateTask(updated)
@@ -749,6 +761,22 @@ object ExcelImportEngine {
             }
         }
 
+        // Auto-register any newly seen engineers from imported tasks/todos so strict PIC selection works seamlessly
+        val existingEngineers = dao.getAllEngineersSync().map { it.name.trim().lowercase() }.toMutableSet()
+        val importedNames = buildSet {
+            dTasks.items.forEach { (_, _, t) ->
+                if (t.personInCharge.isNotBlank()) add(t.personInCharge.trim())
+                parseEngineerList(t.assistantEngineers).forEach { add(it) }
+            }
+            dTodos.items.forEach { td -> if (td.personInCharge.isNotBlank()) add(td.personInCharge.trim()) }
+        }
+        for (name in importedNames) {
+            if (name.lowercase() !in existingEngineers) {
+                dao.insertEngineer(EngineerEntity(name = name, updatedAtMillis = now))
+                existingEngineers += name.lowercase()
+            }
+        }
+
         prefs.setSampleDataSeeded(true)
 
         return ExcelCommitResult(
@@ -775,9 +803,9 @@ object ExcelImportEngine {
             listOf("MCH-602", "Chiller Unit Carrier 30XA", "Utility Roof", "Carrier 30XA SN-8810", "OPERATIONAL", "Boiler & Cooling", "Glycol 30% mix")
         )
         val taskRows = listOf(
-            listOf("Asset Code", "Task Title", "Description", "Cadence (DAILY / WEEKLY / MONTHLY / YEARLY)", "Deadline (yyyy-MM-dd HH:mm)", "Est. Minutes", "Person In Charge", "Custom Group", "Reminder (YES/NO)"),
-            listOf("MCH-601", "Optics Lens & Nozzle Inspection", "Clean protective glass and inspect copper nozzle tip", "DAILY", "2026-12-01 08:00", "20", "Elena Vance", "Assembly Line B", "YES"),
-            listOf("MCH-602", "Condenser Coil Wash", "Wash fin coils and verify approach temperature", "MONTHLY", "2026-12-15 10:00", "60", "Marcus Chen", "Boiler & Cooling", "YES")
+            listOf("Asset Code", "Task Title", "Description", "Cadence (ONCE / DAILY / WEEKLY / MONTHLY / YEARLY)", "Deadline (yyyy-MM-dd HH:mm)", "Est. Minutes", "Person In Charge", "Assistant Engineers", "Custom Group", "Reminder (YES/NO)", "Reminder Lead Hours"),
+            listOf("MCH-601", "Optics Lens & Nozzle Inspection", "Clean protective glass and inspect copper nozzle tip", "DAILY", "2026-12-01 08:00", "20", "Elena Vance", "Marcus Chen", "Assembly Line B", "YES", "2"),
+            listOf("MCH-602", "Condenser Coil Wash", "Wash fin coils and verify approach temperature", "MONTHLY", "2026-12-15 10:00", "60", "Marcus Chen", "", "Boiler & Cooling", "YES", "48")
         )
         val todoRows = listOf(
             listOf("Title", "Notes", "Repeat Rule (ONCE / DAILY / WEEKLY / MONTHLY / YEARLY)", "Trigger Date (yyyy-MM-dd HH:mm)", "Priority (NORMAL / HIGH / URGENT)", "Person In Charge", "Asset Code (Optional)"),
@@ -880,8 +908,10 @@ object ExcelImportEngine {
         val deadlineCol = findCol(headers, "deadline", "due date", "due")
         val estCol = findCol(headers, "est. minutes", "est", "minutes", "time")
         val picCol = findCol(headers, "person in charge", "pic", "engineer", "technician", "assigned")
+        val assistantCol = findCol(headers, "assistant", "helpers", "co-engineer")
         val groupCol = findCol(headers, "custom group", "group")
         val remCol = findCol(headers, "reminder")
+        val leadHoursCol = findCol(headers, "reminder lead hours", "lead hours", "lead time")
 
         if (titleCol < 0 || codeCol < 0) {
             warnings += "Tasks sheet requires 'Asset Code' (or 'Machine') and 'Task Title' columns."
@@ -896,6 +926,7 @@ object ExcelImportEngine {
 
             val cadRaw = row.getOrNull(cadenceCol)?.trim()?.uppercase().orEmpty()
             val cadence = when {
+                cadRaw.contains("ONCE") || cadRaw.contains("ONE") || cadRaw.contains("SINGLE") -> Cadence.ONCE
                 cadRaw.contains("YEAR") || cadRaw.contains("ANNUAL") -> Cadence.YEARLY
                 cadRaw.contains("MONTH") -> Cadence.MONTHLY
                 cadRaw.contains("WEEK") -> Cadence.WEEKLY
@@ -905,8 +936,10 @@ object ExcelImportEngine {
             val parsedDeadline = parseFlexibleDateMillis(row.getOrNull(deadlineCol))
             val estMin = row.getOrNull(estCol)?.trim()?.toDoubleOrNull()?.toInt()?.coerceAtLeast(1) ?: 30
             val pic = row.getOrNull(picCol)?.trim()?.ifEmpty { defaultEngineer } ?: defaultEngineer
+            val assistants = row.getOrNull(assistantCol)?.trim().orEmpty()
             val remStr = row.getOrNull(remCol)?.trim()?.uppercase().orEmpty()
             val remOn = !(remStr == "NO" || remStr == "FALSE" || remStr == "OFF" || remStr == "0")
+            val leadHours = row.getOrNull(leadHoursCol)?.trim()?.toDoubleOrNull()?.toInt()?.coerceAtLeast(1) ?: 24
 
             out += ImportedTaskRow(
                 assetCode = assetCode.uppercase(),
@@ -916,8 +949,10 @@ object ExcelImportEngine {
                 deadlineMillis = parsedDeadline ?: defaultDeadline,
                 estimatedMinutes = estMin,
                 personInCharge = pic,
+                assistantEngineers = assistants,
                 groupName = row.getOrNull(groupCol)?.trim().orEmpty(),
                 reminderEnabled = remOn,
+                reminderLeadHours = leadHours,
                 hasExplicitDeadline = parsedDeadline != null
             )
         }

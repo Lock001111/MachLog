@@ -23,6 +23,7 @@ class MaintenanceRepository(
     val todosFlow: Flow<List<TodoReminderEntity>> = dao.observeTodos()
     val serviceLogsFlow: Flow<List<ServiceLogWithParts>> = dao.observeServiceLogsWithParts()
     val warehousePartsFlow: Flow<List<WarehousePartEntity>> = dao.observeWarehouseParts()
+    val engineersFlow: Flow<List<EngineerEntity>> = dao.observeEngineers()
     val preferencesFlow: Flow<UserPreferences> = prefs.preferencesFlow
 
     suspend fun ensureSeeded() {
@@ -36,6 +37,28 @@ class MaintenanceRepository(
     suspend fun clearAllRecords() {
         dao.clearAllData()
         prefs.setSampleDataSeeded(true)
+    }
+
+    // --- Engineers Roster ---
+    suspend fun saveEngineer(engineer: EngineerEntity): Long {
+        val now = System.currentTimeMillis()
+        val updated = engineer.copy(
+            name = engineer.name.trim(),
+            employeeCode = engineer.employeeCode.trim().uppercase(),
+            role = engineer.role.trim().ifEmpty { "Maintenance Engineer" },
+            shift = engineer.shift.trim().ifEmpty { "Day Shift" },
+            updatedAtMillis = now
+        )
+        return if (engineer.id == 0L) {
+            dao.insertEngineer(updated)
+        } else {
+            dao.updateEngineer(updated)
+            engineer.id
+        }
+    }
+
+    suspend fun deleteEngineer(engineerId: Long) {
+        dao.deleteEngineerById(engineerId)
     }
 
     // --- Custom Groups ---
@@ -78,7 +101,12 @@ class MaintenanceRepository(
     // --- Maintenance Tasks ---
     suspend fun saveTask(task: MaintenanceTaskEntity): Long {
         val now = System.currentTimeMillis()
-        val updated = task.copy(updatedAtMillis = now)
+        val cleanAssistants = formatEngineerList(parseEngineerList(task.assistantEngineers), excludePic = task.personInCharge)
+        val updated = task.copy(
+            assistantEngineers = cleanAssistants,
+            reminderLeadHours = task.reminderLeadHours.coerceAtLeast(1),
+            updatedAtMillis = now
+        )
         return if (task.id == 0L) {
             dao.insertTask(updated)
         } else {
@@ -91,9 +119,15 @@ class MaintenanceRepository(
         dao.deleteTaskById(taskId)
     }
 
+    /**
+     * Completes a task, auto-generates a DONE machine report entry in service_logs,
+     * and if repeatable (cadence != Cadence.ONCE), auto-recreates the next cycle task
+     * complete with its reminder setting & lead time.
+     */
     suspend fun completeTask(
         taskId: Long,
         personInCharge: String,
+        assistantEngineers: List<String> = emptyList(),
         actualDurationMinutes: Int,
         notes: String,
         spareParts: List<SparePartDraft>,
@@ -103,6 +137,12 @@ class MaintenanceRepository(
         val task = dao.getTaskById(taskId) ?: return
         val now = System.currentTimeMillis()
         val deadlineWasMet = now <= task.deadlineMillis
+        val finalPic = personInCharge.trim().ifEmpty { task.personInCharge }
+        val finalAssistants = if (assistantEngineers.isNotEmpty()) {
+            formatEngineerList(assistantEngineers, excludePic = finalPic)
+        } else {
+            formatEngineerList(parseEngineerList(task.assistantEngineers), excludePic = finalPic)
+        }
         val entryType = if (flagMalfunction) {
             ServiceEntryType.MALFUNCTION_REPAIR
         } else {
@@ -114,11 +154,14 @@ class MaintenanceRepository(
             machineId = task.machineId,
             taskId = task.id,
             entryType = entryType,
+            outcome = TaskOutcome.DONE,
             cadenceSnapshot = task.cadence,
             summaryTitle = task.title,
-            malfunctionDetails = notes.ifBlank { "Scheduled ${task.cadence.label.lowercase()} maintenance completed." },
+            malfunctionDetails = notes.ifBlank { "${task.cadence.label} maintenance completed." },
+            rejectionReason = "",
             severity = if (flagMalfunction) malfunctionSeverity else Severity.LOW,
-            personInCharge = personInCharge.ifBlank { task.personInCharge },
+            personInCharge = finalPic,
+            assistantEngineers = finalAssistants,
             serviceDurationMinutes = actualDurationMinutes.coerceAtLeast(1),
             completedAtMillis = now,
             deadlineWasMet = deadlineWasMet,
@@ -140,19 +183,35 @@ class MaintenanceRepository(
             }
         dao.insertLogWithParts(log, partEntities)
 
-        val nextDeadline = computeNextCadenceMillis(
-            baseAnchorMillis = task.deadlineMillis,
-            nowMillis = now,
-            cadence = task.cadence
-        )
-        dao.updateTask(
-            task.copy(
-                personInCharge = personInCharge.ifBlank { task.personInCharge },
-                deadlineMillis = nextDeadline,
-                lastCompletedMillis = now,
-                updatedAtMillis = now
+        // Delete the finished task instance (ServiceLog has ForeignKey.SET_NULL on taskId)
+        dao.deleteTaskById(task.id)
+
+        // If repeatable (with cadence != ONCE), auto-recreate the next task instance with its reminder
+        if (task.cadence != Cadence.ONCE) {
+            val nextDeadline = computeNextCadenceMillis(
+                baseAnchorMillis = task.deadlineMillis,
+                nowMillis = now,
+                cadence = task.cadence
             )
-        )
+            dao.insertTask(
+                MaintenanceTaskEntity(
+                    uuid = UUID.randomUUID().toString(),
+                    machineId = task.machineId,
+                    groupId = task.groupId,
+                    title = task.title,
+                    description = task.description,
+                    cadence = task.cadence,
+                    deadlineMillis = nextDeadline,
+                    estimatedMinutes = task.estimatedMinutes,
+                    personInCharge = finalPic,
+                    assistantEngineers = finalAssistants,
+                    reminderEnabled = task.reminderEnabled,
+                    reminderLeadHours = task.reminderLeadHours,
+                    lastCompletedMillis = now,
+                    updatedAtMillis = now
+                )
+            )
+        }
 
         if (flagMalfunction && (malfunctionSeverity == Severity.HIGH || malfunctionSeverity == Severity.CRITICAL)) {
             updateMachineStatus(task.machineId, MachineStatus.MALFUNCTION)
@@ -164,52 +223,72 @@ class MaintenanceRepository(
         }
     }
 
-    // --- Direct Service / Malfunction Logging ---
-    suspend fun logServiceOrMalfunction(
-        machineId: Long,
-        entryType: ServiceEntryType,
-        summaryTitle: String,
-        details: String,
-        severity: Severity,
+    /**
+     * Rejects a task/service request, auto-generates a REJECTED machine report entry
+     * with reason, PIC, and assistant engineers. Optionally reschedules next cycle for repeatable tasks.
+     */
+    suspend fun rejectTask(
+        taskId: Long,
         personInCharge: String,
-        durationMinutes: Int,
-        spareParts: List<SparePartDraft>,
-        newMachineStatus: MachineStatus?
+        assistantEngineers: List<String> = emptyList(),
+        rejectionReason: String,
+        rescheduleNextCycle: Boolean = false
     ) {
+        val task = dao.getTaskById(taskId) ?: return
         val now = System.currentTimeMillis()
+        val finalPic = personInCharge.trim().ifEmpty { task.personInCharge }
+        val finalAssistants = if (assistantEngineers.isNotEmpty()) {
+            formatEngineerList(assistantEngineers, excludePic = finalPic)
+        } else {
+            formatEngineerList(parseEngineerList(task.assistantEngineers), excludePic = finalPic)
+        }
+        val cleanReason = rejectionReason.trim().ifEmpty { "Service request rejected — machine unavailable for servicing." }
+
         val log = ServiceLogEntity(
             uuid = UUID.randomUUID().toString(),
-            machineId = machineId,
-            taskId = null,
-            entryType = entryType,
-            cadenceSnapshot = null,
-            summaryTitle = summaryTitle.trim(),
-            malfunctionDetails = details.trim(),
-            severity = severity,
-            personInCharge = personInCharge.trim(),
-            serviceDurationMinutes = durationMinutes.coerceAtLeast(1),
+            machineId = task.machineId,
+            taskId = task.id,
+            entryType = ServiceEntryType.PREVENTIVE_SERVICE,
+            outcome = TaskOutcome.REJECTED,
+            cadenceSnapshot = task.cadence,
+            summaryTitle = task.title,
+            malfunctionDetails = "Service request rejected.",
+            rejectionReason = cleanReason,
+            severity = Severity.MEDIUM,
+            personInCharge = finalPic,
+            assistantEngineers = finalAssistants,
+            serviceDurationMinutes = 0,
             completedAtMillis = now,
-            deadlineWasMet = true,
+            deadlineWasMet = now <= task.deadlineMillis,
             updatedAtMillis = now
         )
-        val partEntities = spareParts
-            .filter { it.partName.isNotBlank() || it.partCode.isNotBlank() }
-            .map {
-                SparePartUsedEntity(
-                    uuid = UUID.randomUUID().toString(),
-                    serviceLogId = 0L,
-                    partName = it.partName.trim().ifEmpty { it.partCode.trim() },
-                    partCode = it.partCode.trim(),
-                    partDescription = it.partDescription.trim(),
-                    fromWarehouse = it.fromWarehouse,
-                    quantity = it.quantity.coerceAtLeast(1),
-                    unit = it.unit.trim().ifEmpty { "pcs" }
-                )
-            }
-        dao.insertLogWithParts(log, partEntities)
+        dao.insertLogWithParts(log, emptyList())
 
-        if (newMachineStatus != null) {
-            updateMachineStatus(machineId, newMachineStatus)
+        dao.deleteTaskById(task.id)
+        if (rescheduleNextCycle && task.cadence != Cadence.ONCE) {
+            val nextDeadline = computeNextCadenceMillis(
+                baseAnchorMillis = task.deadlineMillis,
+                nowMillis = now,
+                cadence = task.cadence
+            )
+            dao.insertTask(
+                MaintenanceTaskEntity(
+                    uuid = UUID.randomUUID().toString(),
+                    machineId = task.machineId,
+                    groupId = task.groupId,
+                    title = task.title,
+                    description = task.description,
+                    cadence = task.cadence,
+                    deadlineMillis = nextDeadline,
+                    estimatedMinutes = task.estimatedMinutes,
+                    personInCharge = finalPic,
+                    assistantEngineers = finalAssistants,
+                    reminderEnabled = task.reminderEnabled,
+                    reminderLeadHours = task.reminderLeadHours,
+                    lastCompletedMillis = task.lastCompletedMillis,
+                    updatedAtMillis = now
+                )
+            )
         }
     }
 
@@ -238,7 +317,6 @@ class MaintenanceRepository(
                 )
             )
         } else {
-            // Recurring reminder: record completion timestamp and advance dueAtMillis to next trigger
             val nextDue = computeNextRepeatMillis(
                 baseAnchorMillis = todo.dueAtMillis,
                 nowMillis = now,
@@ -288,6 +366,7 @@ class MaintenanceRepository(
     companion object {
         fun computeNextCadenceMillis(baseAnchorMillis: Long, nowMillis: Long, cadence: Cadence): Long {
             val rule = when (cadence) {
+                Cadence.ONCE -> RepeatRule.ONCE
                 Cadence.DAILY -> RepeatRule.DAILY
                 Cadence.WEEKLY -> RepeatRule.WEEKLY
                 Cadence.MONTHLY -> RepeatRule.MONTHLY

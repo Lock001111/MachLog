@@ -108,20 +108,24 @@ class ReminderCheckWorker(
         val parts = mutableListOf<String>()
         if (overdueTasksCount > 0) parts += "$overdueTasksCount overdue tasks"
         val upcomingTasks = dueTasks.size - overdueTasksCount
-        if (upcomingTasks > 0) parts += "$upcomingTasks tasks due soon"
-        if (dueTodos.isNotEmpty()) parts += "${dueTodos.size} engineer reminders"
+        if (upcomingTasks > 0) parts += "$upcomingTasks tasks within reminder window"
+        if (dueTodos.isNotEmpty()) parts += "${dueTodos.size} to-do items due"
 
         val title = if (overdueTasksCount > 0) {
-            "Factory Maintenance Alert ($overdueTasksCount Overdue)"
+            "Task & Deadline Alert ($overdueTasksCount Overdue)"
         } else {
-            "Upcoming Maintenance & Reminders"
+            "Upcoming Task & To-Do Reminders"
         }
 
         val preview = buildString {
             append(parts.joinToString(" · "))
-            val firstTitle = dueTasks.firstOrNull()?.title ?: dueTodos.firstOrNull()?.title
+            val firstTask = dueTasks.firstOrNull()
+            val firstTitle = firstTask?.title ?: dueTodos.firstOrNull()?.title
             if (firstTitle != null) {
                 append("\nNext: ").append(firstTitle)
+                if (firstTask != null) {
+                    append(" (").append(Formatters.formatRelativeDeadline(firstTask.deadlineMillis, now)).append(")")
+                }
             }
         }
 

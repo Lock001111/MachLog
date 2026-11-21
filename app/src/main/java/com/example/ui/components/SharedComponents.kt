@@ -16,13 +16,21 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.CalendarToday
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -31,6 +39,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,10 +56,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.Cadence
 import com.example.data.CustomGroupEntity
+import com.example.data.EngineerEntity
 import com.example.data.MachineStatus
 import com.example.data.ReminderPriority
 import com.example.data.RepeatRule
 import com.example.data.Severity
+import com.example.data.TaskOutcome
 import com.example.engine.Formatters
 import com.example.ui.theme.LocalMachinaColors
 import com.example.ui.theme.groupColorForKey
@@ -129,6 +143,16 @@ fun SeverityPill(severity: Severity, modifier: Modifier = Modifier) {
         Severity.CRITICAL -> sem.criticalContainer to sem.critical
     }
     StatusPill(text = severity.label.uppercase(), containerColor = bg, contentColor = fg, modifier = modifier)
+}
+
+@Composable
+fun TaskOutcomePill(outcome: TaskOutcome, modifier: Modifier = Modifier) {
+    val sem = LocalMachinaColors.current
+    val (bg, fg) = when (outcome) {
+        TaskOutcome.DONE -> sem.operationalContainer to sem.operational
+        TaskOutcome.REJECTED -> sem.criticalContainer to sem.critical
+    }
+    StatusPill(text = outcome.label.uppercase(), containerColor = bg, contentColor = fg, modifier = modifier)
 }
 
 @Composable
@@ -387,6 +411,134 @@ fun DateTimePickerField(
                 Spacer(Modifier.width(6.dp))
                 val cal = Calendar.getInstance().apply { timeInMillis = millis }
                 Text(String.format("%02d:%02d", cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE)))
+            }
+        }
+    }
+}
+
+@Composable
+fun EngineerPickerField(
+    label: String,
+    selectedName: String,
+    engineers: List<EngineerEntity>,
+    onSelect: (String) -> Unit,
+    testTag: String,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val matched = engineers.find { it.name.equals(selectedName.trim(), ignoreCase = true) }
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(4.dp))
+        Box {
+            OutlinedButton(
+                onClick = { if (engineers.isNotEmpty()) expanded = true },
+                enabled = engineers.isNotEmpty(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .minimumInteractiveComponentSize()
+                    .testTag(testTag)
+            ) {
+                Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = when {
+                        engineers.isEmpty() -> "No engineers available (Add in Engineers tab)"
+                        matched != null -> if (matched.employeeCode.isNotBlank()) "${matched.name} (${matched.employeeCode})" else matched.name
+                        else -> "Select Engineer *"
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(Icons.Filled.ArrowDropDown, contentDescription = "Open engineer selector")
+            }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                engineers.forEach { eng ->
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text(
+                                    text = if (eng.employeeCode.isNotBlank()) "${eng.name} (${eng.employeeCode})" else eng.name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = "${eng.role} · ${eng.shift}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        },
+                        trailingIcon = {
+                            if (eng.name.equals(selectedName.trim(), ignoreCase = true)) {
+                                Icon(Icons.Filled.Check, contentDescription = "Selected")
+                            }
+                        },
+                        onClick = {
+                            onSelect(eng.name)
+                            expanded = false
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun AssistantEngineersSelector(
+    selectedAssistants: List<String>,
+    excludePic: String,
+    engineers: List<EngineerEntity>,
+    onToggleAssistant: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val candidates = remember(engineers, excludePic) {
+        engineers.filterNot { it.name.equals(excludePic.trim(), ignoreCase = true) }
+    }
+    Column(
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Text(
+            text = "Assistant Engineers (Optional · Co-workers)",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        if (candidates.isEmpty()) {
+            Text(
+                text = "Add more engineers in the Engineers menu to assign co-workers.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                candidates.forEach { eng ->
+                    val isSelected = selectedAssistants.any { it.equals(eng.name, ignoreCase = true) }
+                    FilterChip(
+                        selected = isSelected,
+                        onClick = { onToggleAssistant(eng.name) },
+                        leadingIcon = if (isSelected) {
+                            { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                        } else null,
+                        label = { Text(eng.name) },
+                        modifier = Modifier.testTag("assistant_chip_${eng.id}")
+                    )
+                }
             }
         }
     }

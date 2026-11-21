@@ -134,6 +134,28 @@ interface MachinaDao {
     @Query("DELETE FROM warehouse_parts WHERE id = :partId")
     suspend fun deleteWarehousePartById(partId: Long)
 
+    // --- Engineers Roster ---
+    @Query("SELECT * FROM engineers ORDER BY name ASC")
+    fun observeEngineers(): Flow<List<EngineerEntity>>
+
+    @Query("SELECT * FROM engineers ORDER BY name ASC")
+    suspend fun getAllEngineersSync(): List<EngineerEntity>
+
+    @Query("SELECT * FROM engineers WHERE id = :id")
+    suspend fun getEngineerById(id: Long): EngineerEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertEngineer(engineer: EngineerEntity): Long
+
+    @Update
+    suspend fun updateEngineer(engineer: EngineerEntity)
+
+    @Query("DELETE FROM engineers WHERE id = :engineerId")
+    suspend fun deleteEngineerById(engineerId: Long)
+
+    @Query("DELETE FROM engineers")
+    suspend fun clearAllEngineers()
+
     @Query("DELETE FROM warehouse_parts")
     suspend fun clearAllWarehouseParts()
 
@@ -164,5 +186,6 @@ interface MachinaDao {
         clearAllMachines()
         clearAllGroups()
         clearAllWarehouseParts()
+        clearAllEngineers()
     }
 }

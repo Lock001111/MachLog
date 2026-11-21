@@ -18,16 +18,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddTask
 import androidx.compose.material.icons.filled.Assessment
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.Engineering
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.PrecisionManufacturing
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.material.icons.outlined.Assessment
-import androidx.compose.material.icons.outlined.Checklist
+import androidx.compose.material.icons.outlined.Engineering
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.PrecisionManufacturing
 import androidx.compose.material.icons.outlined.TaskAlt
@@ -51,9 +51,11 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -70,6 +72,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.R
+import com.example.data.EngineerEntity
 import com.example.data.MachineEntity
 import com.example.data.MaintenanceTaskEntity
 import com.example.data.TodoReminderEntity
@@ -77,19 +80,20 @@ import com.example.data.WarehousePartEntity
 import com.example.engine.ExportFilterParams
 import com.example.engine.Formatters
 import com.example.engine.NotificationChannels
+import com.example.ui.screens.EngineerEditorDialog
+import com.example.ui.screens.EngineersScreen
 import com.example.ui.screens.MachinesScreen
 import com.example.ui.screens.ReportsScreen
 import com.example.ui.screens.TasksScreen
-import com.example.ui.screens.TodoScreen
 import com.example.ui.screens.WarehousePartsScreen
 import com.example.ui.sheets.CompleteTaskDialog
 import com.example.ui.sheets.ExcelImportPreviewDialog
 import com.example.ui.sheets.ExportReportDialog
 import com.example.ui.sheets.ImportBackupPreviewDialog
 import com.example.ui.sheets.MachineEditorDialog
-import com.example.ui.sheets.MalfunctionLogDialog
 import com.example.ui.sheets.ManageGroupsDialog
 import com.example.ui.sheets.PcWebPortalDialog
+import com.example.ui.sheets.RejectTaskDialog
 import com.example.ui.sheets.SyncBackupSettingsDialog
 import com.example.ui.sheets.TaskEditorDialog
 import com.example.ui.sheets.TodoEditorDialog
@@ -97,9 +101,9 @@ import com.example.ui.sheets.WarehousePartEditorDialog
 import kotlinx.coroutines.launch
 
 const val ROUTE_TASKS = "tasks"
-const val ROUTE_TODO = "todo"
 const val ROUTE_MACHINES = "machines"
 const val ROUTE_WAREHOUSE = "warehouse"
+const val ROUTE_ENGINEERS = "engineers"
 const val ROUTE_REPORTS = "reports"
 
 private data class NavDestination(
@@ -111,9 +115,9 @@ private data class NavDestination(
 
 private val TopDestinations = listOf(
     NavDestination(ROUTE_TASKS, R.string.nav_tasks, Icons.Filled.TaskAlt, Icons.Outlined.TaskAlt),
-    NavDestination(ROUTE_TODO, R.string.nav_todo, Icons.Filled.Checklist, Icons.Outlined.Checklist),
     NavDestination(ROUTE_MACHINES, R.string.nav_machines, Icons.Filled.PrecisionManufacturing, Icons.Outlined.PrecisionManufacturing),
     NavDestination(ROUTE_WAREHOUSE, R.string.nav_warehouse, Icons.Filled.Inventory2, Icons.Outlined.Inventory2),
+    NavDestination(ROUTE_ENGINEERS, R.string.nav_engineers, Icons.Filled.Engineering, Icons.Outlined.Engineering),
     NavDestination(ROUTE_REPORTS, R.string.nav_reports, Icons.Filled.Assessment, Icons.Outlined.Assessment)
 )
 
@@ -127,15 +131,15 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
     val currentRoute = navBackStack?.destination?.route ?: ROUTE_TASKS
     val snackbarHostState = remember { SnackbarHostState() }
 
+    var tasksSubTab by rememberSaveable { mutableIntStateOf(0) }
+
     // Modal / Dialog State
     var showTaskEditor by remember { mutableStateOf(false) }
     var editingTask by remember { mutableStateOf<MaintenanceTaskEntity?>(null) }
     var taskDefaultMachineId by remember { mutableStateOf<Long?>(null) }
 
     var completingTask by remember { mutableStateOf<MaintenanceTaskEntity?>(null) }
-
-    var showMalfunctionDialog by remember { mutableStateOf(false) }
-    var malfunctionDefaultMachineId by remember { mutableStateOf<Long?>(null) }
+    var rejectingTask by remember { mutableStateOf<MaintenanceTaskEntity?>(null) }
 
     var showMachineEditor by remember { mutableStateOf(false) }
     var editingMachine by remember { mutableStateOf<MachineEntity?>(null) }
@@ -147,6 +151,9 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
 
     var showWarehousePartEditor by remember { mutableStateOf(false) }
     var editingWarehousePart by remember { mutableStateOf<WarehousePartEntity?>(null) }
+
+    var showEngineerEditor by remember { mutableStateOf(false) }
+    var editingEngineer by remember { mutableStateOf<EngineerEntity?>(null) }
 
     var showExportDialog by remember { mutableStateOf(false) }
     var exportPreferPdf by remember { mutableStateOf(false) }
@@ -308,12 +315,13 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                         }
                         IconButton(
                             onClick = {
-                                malfunctionDefaultMachineId = state.selectedMachineId ?: state.machines.firstOrNull()?.id
-                                showMalfunctionDialog = true
+                                editingTask = null
+                                taskDefaultMachineId = state.selectedMachineId ?: state.machines.firstOrNull()?.id
+                                showTaskEditor = true
                             },
-                            modifier = Modifier.testTag("topbar_log_malfunction_button")
+                            modifier = Modifier.testTag("topbar_add_task_button")
                         ) {
-                            Icon(Icons.Filled.Build, contentDescription = stringResource(R.string.action_log_malfunction))
+                            Icon(Icons.Filled.AddTask, contentDescription = stringResource(R.string.action_add_task))
                         }
                         IconButton(
                             onClick = {
@@ -333,8 +341,7 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                         TopDestinations.forEach { dest ->
                             val selected = currentRoute == dest.route
                             val badgeCount = when (dest.route) {
-                                ROUTE_TASKS -> overdueTasksCount
-                                ROUTE_TODO -> overdueTodosCount
+                                ROUTE_TASKS -> overdueTasksCount + overdueTodosCount
                                 else -> 0
                             }
                             NavigationBarItem(
@@ -363,25 +370,30 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
             },
             floatingActionButton = {
                 when (currentRoute) {
-                    ROUTE_TASKS -> ExtendedFloatingActionButton(
-                        onClick = {
-                            editingTask = null
-                            taskDefaultMachineId = state.machines.firstOrNull()?.id
-                            showTaskEditor = true
-                        },
-                        icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                        text = { Text(stringResource(R.string.action_add_task)) },
-                        modifier = Modifier.testTag("fab_add_task")
-                    )
-                    ROUTE_TODO -> ExtendedFloatingActionButton(
-                        onClick = {
-                            editingTodo = null
-                            showTodoEditor = true
-                        },
-                        icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                        text = { Text(stringResource(R.string.action_add_todo)) },
-                        modifier = Modifier.testTag("fab_add_todo")
-                    )
+                    ROUTE_TASKS -> {
+                        if (tasksSubTab == 1) {
+                            ExtendedFloatingActionButton(
+                                onClick = {
+                                    editingTodo = null
+                                    showTodoEditor = true
+                                },
+                                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                                text = { Text(stringResource(R.string.action_add_todo)) },
+                                modifier = Modifier.testTag("fab_add_todo")
+                            )
+                        } else if (tasksSubTab == 0) {
+                            ExtendedFloatingActionButton(
+                                onClick = {
+                                    editingTask = null
+                                    taskDefaultMachineId = state.machines.firstOrNull()?.id
+                                    showTaskEditor = true
+                                },
+                                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                                text = { Text(stringResource(R.string.action_add_task)) },
+                                modifier = Modifier.testTag("fab_add_task")
+                            )
+                        }
+                    }
                     ROUTE_MACHINES -> ExtendedFloatingActionButton(
                         onClick = {
                             editingMachine = null
@@ -400,6 +412,15 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                         text = { Text(stringResource(R.string.action_add_warehouse_part)) },
                         modifier = Modifier.testTag("fab_add_warehouse_part")
                     )
+                    ROUTE_ENGINEERS -> ExtendedFloatingActionButton(
+                        onClick = {
+                            editingEngineer = null
+                            showEngineerEditor = true
+                        },
+                        icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                        text = { Text(stringResource(R.string.action_add_engineer)) },
+                        modifier = Modifier.testTag("fab_add_engineer")
+                    )
                 }
             }
         ) { innerPadding ->
@@ -414,8 +435,7 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                         TopDestinations.forEach { dest ->
                             val selected = currentRoute == dest.route
                             val badgeCount = when (dest.route) {
-                                ROUTE_TASKS -> overdueTasksCount
-                                ROUTE_TODO -> overdueTodosCount
+                                ROUTE_TASKS -> overdueTasksCount + overdueTodosCount
                                 else -> 0
                             }
                             NavigationRailItem(
@@ -456,6 +476,8 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                         composable(ROUTE_TASKS) {
                             TasksScreen(
                                 state = state,
+                                selectedSubTab = tasksSubTab,
+                                onSelectSubTab = { tasksSubTab = it },
                                 onUpdateFilter = viewModel::updateTasksFilter,
                                 onAddTask = {
                                     editingTask = null
@@ -468,6 +490,7 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                                     showTaskEditor = true
                                 },
                                 onCompleteTask = { task -> completingTask = task },
+                                onRejectTask = { task -> rejectingTask = task },
                                 onManageGroups = { showManageGroups = true },
                                 onImportExcel = {
                                     openExcelLauncher.launch(
@@ -477,14 +500,9 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                                             "*/*"
                                         )
                                     )
-                                }
-                            )
-                        }
-                        composable(ROUTE_TODO) {
-                            TodoScreen(
-                                state = state,
-                                onUpdateFilter = viewModel::updateTodoFilter,
-                                onToggleComplete = viewModel::toggleTodoComplete,
+                                },
+                                onUpdateTodoFilter = viewModel::updateTodoFilter,
+                                onToggleTodoComplete = viewModel::toggleTodoComplete,
                                 onAddTodo = {
                                     editingTodo = null
                                     showTodoEditor = true
@@ -493,7 +511,8 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                                     editingTodo = todo
                                     showTodoEditor = true
                                 },
-                                onDeleteTodo = { todo -> viewModel.deleteTodo(todo.id) }
+                                onDeleteTodo = { todo -> viewModel.deleteTodo(todo.id) },
+                                onDeleteLog = viewModel::deleteServiceLog
                             )
                         }
                         composable(ROUTE_MACHINES) {
@@ -518,10 +537,7 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                                     showTaskEditor = true
                                 },
                                 onCompleteTask = { task -> completingTask = task },
-                                onLogMalfunctionForMachine = { machineId ->
-                                    malfunctionDefaultMachineId = machineId
-                                    showMalfunctionDialog = true
-                                },
+                                onRejectTask = { task -> rejectingTask = task },
                                 onManageGroups = { showManageGroups = true },
                                 onImportExcel = {
                                     openExcelLauncher.launch(
@@ -557,6 +573,20 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                                 }
                             )
                         }
+                        composable(ROUTE_ENGINEERS) {
+                            EngineersScreen(
+                                state = state,
+                                onAddEngineer = {
+                                    editingEngineer = null
+                                    showEngineerEditor = true
+                                },
+                                onEditEngineer = { eng ->
+                                    editingEngineer = eng
+                                    showEngineerEditor = true
+                                },
+                                onDeleteEngineer = { eng -> viewModel.deleteEngineer(eng.id) }
+                            )
+                        }
                         composable(ROUTE_REPORTS) {
                             ReportsScreen(
                                 state = state,
@@ -584,13 +614,14 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
             defaultEngineerName = state.preferences.defaultEngineerName,
             machines = state.machines,
             groups = state.groups,
+            engineers = state.engineers,
             onDismiss = { showTaskEditor = false },
             onDelete = { taskId ->
                 viewModel.deleteTask(taskId)
                 showTaskEditor = false
             },
-            onSave = { id, uuid, machineId, groupId, title, desc, cadence, deadline, estMin, pic, remOn, leadHrs, lastComp ->
-                viewModel.saveTask(id, uuid, machineId, groupId, title, desc, cadence, deadline, estMin, pic, remOn, leadHrs, lastComp)
+            onSave = { id, uuid, machineId, groupId, title, desc, cadence, deadline, estMin, pic, assistants, remOn, leadHrs, lastComp ->
+                viewModel.saveTask(id, uuid, machineId, groupId, title, desc, cadence, deadline, estMin, pic, assistants, remOn, leadHrs, lastComp)
                 showTaskEditor = false
             }
         )
@@ -601,25 +632,37 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
         CompleteTaskDialog(
             task = task,
             machineName = machineName,
+            engineers = state.engineers,
             warehouseCatalog = state.warehouseParts,
             onDismiss = { completingTask = null },
-            onSubmit = { pic, actualMin, notes, spareParts, flagMalfunction, severity ->
-                viewModel.completeTask(task.id, pic, actualMin, notes, spareParts, flagMalfunction, severity)
+            onSubmit = { pic, assistants, actualMin, notes, spareParts, flagMalfunction, severity ->
+                viewModel.completeTask(task.id, pic, assistants, actualMin, notes, spareParts, flagMalfunction, severity)
                 completingTask = null
             }
         )
     }
 
-    if (showMalfunctionDialog) {
-        MalfunctionLogDialog(
-            machines = state.machines,
-            defaultMachineId = malfunctionDefaultMachineId,
-            defaultEngineerName = state.preferences.defaultEngineerName,
-            warehouseCatalog = state.warehouseParts,
-            onDismiss = { showMalfunctionDialog = false },
-            onSubmit = { machineId, entryType, summary, details, severity, pic, durationMin, parts, newStatus ->
-                viewModel.logServiceOrMalfunction(machineId, entryType, summary, details, severity, pic, durationMin, parts, newStatus)
-                showMalfunctionDialog = false
+    rejectingTask?.let { task ->
+        val machineName = state.machines.find { it.id == task.machineId }?.let { "${it.assetCode} ${it.name}" } ?: "Machine"
+        RejectTaskDialog(
+            task = task,
+            machineName = machineName,
+            engineers = state.engineers,
+            onDismiss = { rejectingTask = null },
+            onSubmit = { pic, assistants, reason, reschedule ->
+                viewModel.rejectTask(task.id, pic, assistants, reason, reschedule)
+                rejectingTask = null
+            }
+        )
+    }
+
+    if (showEngineerEditor) {
+        EngineerEditorDialog(
+            initialEngineer = editingEngineer,
+            onDismiss = { showEngineerEditor = false },
+            onSave = { id, uuid, name, code, role, shift ->
+                viewModel.saveEngineer(id, uuid, name, code, role, shift)
+                showEngineerEditor = false
             }
         )
     }
@@ -662,6 +705,7 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
             defaultEngineerName = state.preferences.defaultEngineerName,
             machines = state.machines,
             groups = state.groups,
+            engineers = state.engineers,
             onDismiss = { showTodoEditor = false },
             onSave = { id, uuid, title, notes, machineId, groupId, pic, rule, dueAt, remOn, priority, isDone, doneAt ->
                 viewModel.saveTodo(id, uuid, title, notes, machineId, groupId, pic, rule, dueAt, remOn, priority, isDone, doneAt)

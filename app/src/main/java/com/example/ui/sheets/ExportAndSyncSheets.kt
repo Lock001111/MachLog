@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.dp
 import com.example.data.AutoBackupFrequency
 import com.example.data.Cadence
 import com.example.data.ServiceEntryType
+import com.example.data.TaskOutcome
 import com.example.engine.CategoryDiffStats
 import com.example.engine.ExcelImportPreview
 import com.example.engine.ExportFilterParams
@@ -78,6 +79,7 @@ import com.example.engine.ReportExportEngine
 import com.example.engine.RestoreMode
 import com.example.engine.WebPortalStatus
 import com.example.ui.MachinaUiState
+import com.example.ui.components.EngineerPickerField
 import java.io.File
 import java.util.Calendar
 
@@ -314,6 +316,31 @@ fun ExportReportDialog(
                     }
                 }
 
+                // Outcome Parameter (Done vs Rejected)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                ) {
+                    FilterChip(
+                        selected = params.outcome == null,
+                        onClick = {
+                            params = params.copy(outcome = null)
+                            onUpdateParams(params)
+                        },
+                        label = { Text("All Outcomes") }
+                    )
+                    TaskOutcome.entries.forEach { out ->
+                        FilterChip(
+                            selected = params.outcome == out,
+                            onClick = {
+                                params = params.copy(outcome = if (params.outcome == out) null else out)
+                                onUpdateParams(params)
+                            },
+                            label = { Text(out.label) }
+                        )
+                    }
+                }
+
                 // Time Period From / To
                 Text("Time Period", style = MaterialTheme.typography.labelLarge)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -413,9 +440,6 @@ fun SyncBackupSettingsDialog(
 ) {
     val context = LocalContext.current
     val hasPermission = NotificationChannels.hasNotificationPermission(context)
-    var engineerName by remember(state.preferences.defaultEngineerName) {
-        mutableStateOf(state.preferences.defaultEngineerName)
-    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -655,15 +679,12 @@ fun SyncBackupSettingsDialog(
                 HorizontalDivider()
 
                 // 4. Default Engineer & Sample Reset
-                OutlinedTextField(
-                    value = engineerName,
-                    onValueChange = {
-                        engineerName = it
-                        onSetEngineerName(it)
-                    },
-                    label = { Text("Default Engineer (PIC)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                EngineerPickerField(
+                    label = "Default Engineer (PIC)",
+                    selectedName = state.preferences.defaultEngineerName,
+                    engineers = state.engineers,
+                    onSelect = onSetEngineerName,
+                    testTag = "sync_default_engineer_picker"
                 )
 
                 TextButton(
@@ -711,6 +732,7 @@ fun ImportBackupPreviewDialog(
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                         modifier = Modifier.padding(12.dp)
                     ) {
+                        Text("• ${pkg.engineers.size} Engineers", style = MaterialTheme.typography.bodySmall)
                         Text("• ${pkg.groups.size} Custom Groups", style = MaterialTheme.typography.bodySmall)
                         Text("• ${pkg.machines.size} Machines", style = MaterialTheme.typography.bodySmall)
                         Text("• ${pkg.tasks.size} Maintenance Tasks", style = MaterialTheme.typography.bodySmall)
