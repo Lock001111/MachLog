@@ -1,0 +1,6 @@
+{
+  "name": "MachinaLog",
+  "description": "Offline factory maintenance scheduler, machine fleet tracker, recurring to-do reminders, parameter-filtered Excel/PDF reports, and portable backup sync.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

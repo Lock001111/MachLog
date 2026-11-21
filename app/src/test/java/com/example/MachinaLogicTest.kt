@@ -1,0 +1,327 @@
+package com.example
+
+import com.example.data.Cadence
+import com.example.data.CustomGroupEntity
+import com.example.data.MachineEntity
+import com.example.data.MaintenanceRepository
+import com.example.data.MaintenanceTaskEntity
+import com.example.data.RepeatRule
+import com.example.data.ServiceEntryType
+import com.example.data.ServiceLogEntity
+import com.example.data.ServiceLogWithParts
+import com.example.data.SparePartUsedEntity
+import com.example.data.WarehousePartEntity
+import com.example.engine.BackupSyncManager
+import com.example.engine.ExcelImportEngine
+import com.example.engine.ExcelImportPreview
+import com.example.engine.ExportFilterParams
+import com.example.engine.ImportedMachineRow
+import com.example.engine.ImportedTaskRow
+import com.example.engine.ImportedWarehousePartRow
+import com.example.engine.LocalWebServerManager
+import com.example.engine.PortableBackupPackage
+import com.example.engine.ReportExportEngine
+import com.example.data.MachineStatus
+import com.example.ui.screens.filterWarehouseParts
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.io.BufferedInputStream
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.util.Calendar
+import java.util.zip.ZipInputStream
+
+class MachinaLogicTest {
+
+    @Test
+    fun `recurring cadence rollover advances into future while preserving time`() {
+        val baseCal = Calendar.getInstance().apply {
+            set(2026, Calendar.JANUARY, 10, 8, 30, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val nowCal = Calendar.getInstance().apply {
+            set(2026, Calendar.JANUARY, 12, 14, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+
+        val nextDaily = MaintenanceRepository.computeNextCadenceMillis(baseCal.timeInMillis, nowCal.timeInMillis, Cadence.DAILY)
+        assertTrue(nextDaily > nowCal.timeInMillis)
+        val resCal = Calendar.getInstance().apply { timeInMillis = nextDaily }
+        assertEquals(8, resCal.get(Calendar.HOUR_OF_DAY))
+        assertEquals(30, resCal.get(Calendar.MINUTE))
+
+        val nextYearly = MaintenanceRepository.computeNextRepeatMillis(baseCal.timeInMillis, nowCal.timeInMillis, RepeatRule.YEARLY)
+        val yearCal = Calendar.getInstance().apply { timeInMillis = nextYearly }
+        assertEquals(2027, yearCal.get(Calendar.YEAR))
+    }
+
+    @Test
+    fun `excel export creates valid multi-sheet xlsx zip package with parameter filters`() {
+        val group = CustomGroupEntity(id = 1L, name = "Line A")
+        val m1 = MachineEntity(id = 10L, groupId = 1L, assetCode = "MCH-10", name = "Lathe", locationZone = "Bay 1", modelInfo = "L-10")
+        val m2 = MachineEntity(id = 20L, groupId = null, assetCode = "MCH-20", name = "Compressor", locationZone = "Utility", modelInfo = "C-20")
+        val t1 = MaintenanceTaskEntity(id = 100L, machineId = 10L, title = "Oil Check", cadence = Cadence.DAILY, deadlineMillis = 1700000000000L, personInCharge = "Elena")
+        val t2 = MaintenanceTaskEntity(id = 101L, machineId = 20L, title = "Belt Swap", cadence = Cadence.WEEKLY, deadlineMillis = 1700000000000L, personInCharge = "Marcus")
+
+        val log1 = ServiceLogWithParts(
+            log = ServiceLogEntity(
+                id = 500L,
+                machineId = 10L,
+                entryType = ServiceEntryType.MALFUNCTION_REPAIR,
+                summaryTitle = "Coolant Leak",
+                malfunctionDetails = "Replaced cracked hose",
+                personInCharge = "Elena",
+                serviceDurationMinutes = 45,
+                completedAtMillis = 1700000000000L
+            ),
+            parts = listOf(
+                SparePartUsedEntity(
+                    id = 1L,
+                    serviceLogId = 500L,
+                    partName = "Coolant Hose",
+                    partCode = "WH-CH-10",
+                    partDescription = "Braided EPDM high-pressure 12mm coolant line",
+                    fromWarehouse = true,
+                    quantity = 2,
+                    unit = "pcs"
+                )
+            )
+        )
+
+        val params = ExportFilterParams(personInCharge = "Elena")
+        val dataset = ReportExportEngine.filterDataset(params, listOf(m1, m2), listOf(group), listOf(t1, t2), listOf(log1))
+        assertEquals(1, dataset.tasks.size)
+        assertEquals(1, dataset.logs.size)
+
+        val baos = ByteArrayOutputStream()
+        ReportExportEngine.writeXlsx(baos, params, dataset)
+
+        val entries = mutableMapOf<String, String>()
+        ZipInputStream(ByteArrayInputStream(baos.toByteArray())).use { zis ->
+            var entry = zis.nextEntry
+            while (entry != null) {
+                entries[entry.name] = zis.readBytes().toString(Charsets.UTF_8)
+                entry = zis.nextEntry
+            }
+        }
+        assertTrue(entries.containsKey("[Content_Types].xml"))
+        assertTrue(entries.containsKey("xl/workbook.xml"))
+        assertTrue(entries.containsKey("xl/worksheets/sheet1.xml"))
+        assertTrue(entries.containsKey("xl/worksheets/sheet4.xml"))
+        val sheet4 = entries["xl/worksheets/sheet4.xml"].orEmpty()
+        assertTrue(sheet4.contains("Spare Part ID / No."))
+        assertTrue(sheet4.contains("Spare Part Description"))
+        assertTrue(sheet4.contains("From Warehouse"))
+        assertTrue(sheet4.contains("WH-CH-10"))
+        assertTrue(sheet4.contains("Braided EPDM high-pressure 12mm coolant line"))
+    }
+
+    @Test
+    fun `excel import engine parses generated template workbook accurately`() {
+        val baos = ByteArrayOutputStream()
+        ExcelImportEngine.writeImportTemplateXlsx(baos)
+
+        val preview = ExcelImportEngine.parseXlsx(
+            inputStream = ByteArrayInputStream(baos.toByteArray()),
+            defaultEngineer = "Alex Rivera"
+        )
+        assertEquals(2, preview.groups.size)
+        assertEquals(2, preview.machines.size)
+        assertEquals(2, preview.tasks.size)
+        assertEquals(2, preview.todos.size)
+        assertEquals(2, preview.warehouseParts.size)
+        assertEquals("MCH-601", preview.machines.first().assetCode)
+        assertEquals(Cadence.MONTHLY, preview.tasks[1].cadence)
+        assertEquals(RepeatRule.WEEKLY, preview.todos[1].repeatRule)
+        assertEquals("TR-NZL-15", preview.warehouseParts.first().partCode)
+    }
+
+    @Test
+    fun `warehouse catalog filter matches multi-token queries across code and description`() {
+        val parts = listOf(
+            WarehousePartEntity(id = 1L, partCode = "BRG-6205-2RS", partName = "Deep Groove Bearing", partDescription = "SKF 25x52x15mm double-sealed conveyor bearing"),
+            WarehousePartEntity(id = 2L, partCode = "HF-40-10UM", partName = "Hydraulic Return Filter", partDescription = "10-micron spin-on return tank filter"),
+            WarehousePartEntity(id = 3L, partCode = "SOL-24DC-52", partName = "Pneumatic Solenoid", partDescription = "24V DC NAMUR directional valve")
+        )
+
+        val byCode = filterWarehouseParts(parts, "brg 6205")
+        assertEquals(1, byCode.size)
+        assertEquals("BRG-6205-2RS", byCode.first().partCode)
+
+        val byDesc = filterWarehouseParts(parts, "10-micron tank")
+        assertEquals(1, byDesc.size)
+        assertEquals("HF-40-10UM", byDesc.first().partCode)
+
+        assertEquals(3, filterWarehouseParts(parts, "   ").size)
+    }
+
+    @Test
+    fun `backup json parser decodes empty portable package`() {
+        val sampleJson = """
+            {
+              "schemaVersion": 1,
+              "exportedAtMillis": 1700000000000,
+              "deviceLabel": "Pixel Tablet",
+              "groups": [],
+              "machines": [],
+              "tasks": [],
+              "todos": [],
+              "serviceLogs": [],
+              "warehouseParts": [
+                {
+                  "uuid": "wp-1",
+                  "partCode": "HF-40-10UM",
+                  "partName": "Hydraulic Return Filter",
+                  "partDescription": "10-micron return element",
+                  "defaultUnit": "pcs",
+                  "updatedAtMillis": 1700000000000
+                }
+              ]
+            }
+        """.trimIndent()
+        val parsed: PortableBackupPackage? = BackupSyncManager.parseBackupJson(sampleJson)
+        assertNotNull(parsed)
+        assertEquals("Pixel Tablet", parsed?.deviceLabel)
+        assertEquals(1, parsed?.warehouseParts?.size)
+        assertEquals("HF-40-10UM", parsed?.warehouseParts?.firstOrNull()?.partCode)
+    }
+
+    @Test
+    fun `local web server http parser handles query strings and exact binary content length`() {
+        val binaryPayload = byteArrayOf(0x50, 0x4B, 0x03, 0x04, 0x00, 0x01, 0x7F, -128)
+        val header = buildString {
+            append("POST /api/excel/import?replace=true&pin=4821 HTTP/1.1\r\n")
+            append("Host: 192.168.1.42:8080\r\n")
+            append("X-Machina-Pin: 4821\r\n")
+            append("Content-Length: ${binaryPayload.size}\r\n")
+            append("\r\n")
+        }.toByteArray(Charsets.ISO_8859_1)
+
+        val stream = BufferedInputStream(ByteArrayInputStream(header + binaryPayload))
+        val parsed = LocalWebServerManager.readHttpRequest(stream)
+        assertNotNull(parsed)
+        assertEquals("POST", parsed?.method)
+        assertEquals("/api/excel/import", parsed?.path)
+        assertEquals("true", parsed?.query?.get("replace"))
+        assertEquals("4821", parsed?.headers?.get("x-machina-pin"))
+        assertArrayEquals(binaryPayload, parsed?.body)
+
+        // Ensure network discovery safely returns non-null list
+        val ips = LocalWebServerManager.discoverLocalIpv4Addresses()
+        assertNotNull(ips)
+    }
+
+    @Test
+    fun `excel diff summary detects new and modified machines, tasks, and warehouse parts while skipping duplicates`() {
+        val existingMachines = listOf(
+            MachineEntity(
+                id = 10L,
+                assetCode = "MCH-100",
+                name = "CNC Lathe A",
+                locationZone = "Bay 1",
+                modelInfo = "Haas ST-10",
+                status = MachineStatus.OPERATIONAL,
+                notes = "Primary lathe"
+            )
+        )
+        val existingTasks = listOf(
+            MaintenanceTaskEntity(
+                id = 20L,
+                machineId = 10L,
+                title = "Check Spindle Coolant",
+                description = "Inspect coolant level",
+                cadence = Cadence.DAILY,
+                deadlineMillis = 1700000000000L,
+                estimatedMinutes = 15,
+                personInCharge = "Elena",
+                reminderEnabled = true
+            ),
+            MaintenanceTaskEntity(
+                id = 21L,
+                machineId = 10L,
+                title = "Filter Flush",
+                description = "Old description",
+                cadence = Cadence.WEEKLY,
+                deadlineMillis = 1700000000000L,
+                estimatedMinutes = 30,
+                personInCharge = "Elena",
+                reminderEnabled = true
+            )
+        )
+        val existingParts = listOf(
+            WarehousePartEntity(
+                id = 30L,
+                partCode = "BRG-6205",
+                partName = "Bearing 6205",
+                partDescription = "Standard sealed bearing",
+                defaultUnit = "pcs"
+            ),
+            WarehousePartEntity(
+                id = 31L,
+                partCode = "FLT-10",
+                partName = "Return Filter",
+                partDescription = "25-micron filter",
+                defaultUnit = "pcs"
+            )
+        )
+
+        val preview = ExcelImportPreview(
+            groups = emptyList(),
+            machines = listOf(
+                // Exact duplicate of MCH-100 (plus extra duplicate row inside workbook) -> both skipped
+                ImportedMachineRow("mch-100", "CNC Lathe A", "Bay 1", "Haas ST-10", MachineStatus.OPERATIONAL, "", "Primary lathe"),
+                ImportedMachineRow("MCH-100", "CNC Lathe A", "Bay 1", "Haas ST-10", MachineStatus.OPERATIONAL, "", "Primary lathe"),
+                // Brand new machine -> 1 new
+                ImportedMachineRow("MCH-200", "Hydraulic Press", "Bay 2", "Schuler 200T", MachineStatus.OPERATIONAL, "", "")
+            ),
+            tasks = listOf(
+                // Identical task (without explicit deadline column) -> skipped duplicate
+                ImportedTaskRow("MCH-100", "Check Spindle Coolant", "Inspect coolant level", Cadence.DAILY, 9999999999999L, 15, "Elena", "", true, hasExplicitDeadline = false),
+                // Changed description & PIC -> 1 updated
+                ImportedTaskRow("MCH-100", "Filter Flush", "Updated ultrasonic flush", Cadence.WEEKLY, 1700000000000L, 30, "Marcus", "", true, hasExplicitDeadline = true),
+                // Brand new task on existing machine -> 1 new
+                ImportedTaskRow("MCH-100", "Axis Grease", "Lubricate ballscrews", Cadence.MONTHLY, 1700000000000L, 45, "Elena", "", true, hasExplicitDeadline = true),
+                // Brand new task on newly imported machine -> 1 new
+                ImportedTaskRow("MCH-200", "Ram Seal Check", "Verify zero drip", Cadence.DAILY, 1700000000000L, 20, "Marcus", "", true, hasExplicitDeadline = true)
+            ),
+            todos = emptyList(),
+            warehouseParts = listOf(
+                // Identical duplicate -> skipped
+                ImportedWarehousePartRow("BRG-6205", "Bearing 6205", "Standard sealed bearing", "pcs"),
+                // Changed description -> 1 updated
+                ImportedWarehousePartRow("flt-10", "Return Filter", "10-micron upgraded filter", "pcs"),
+                // Brand new part -> 1 new
+                ImportedWarehousePartRow("BELT-A42", "Drive Belt A42", "Kevlar V-belt", "pcs")
+            ),
+            warnings = emptyList()
+        )
+
+        val diff = ExcelImportEngine.computeDiffSummary(
+            preview = preview,
+            existingGroups = emptyList(),
+            existingMachines = existingMachines,
+            existingTasks = existingTasks,
+            existingTodos = emptyList(),
+            existingWarehouseParts = existingParts
+        )
+
+        assertEquals(1, diff.machines.newCount)
+        assertEquals(0, diff.machines.updatedCount)
+        assertEquals(2, diff.machines.unchangedSkippedCount)
+
+        assertEquals(2, diff.tasks.newCount)
+        assertEquals(1, diff.tasks.updatedCount)
+        assertEquals(1, diff.tasks.unchangedSkippedCount)
+
+        assertEquals(1, diff.warehouseParts.newCount)
+        assertEquals(1, diff.warehouseParts.updatedCount)
+        assertEquals(1, diff.warehouseParts.unchangedSkippedCount)
+
+        assertEquals(4, diff.totalNew)
+        assertEquals(2, diff.totalUpdated)
+        assertEquals(4, diff.totalSkippedDuplicates)
+    }
+}

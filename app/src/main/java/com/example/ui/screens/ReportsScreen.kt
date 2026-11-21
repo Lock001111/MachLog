@@ -1,0 +1,519 @@
+package com.example.ui.screens
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.PrecisionManufacturing
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.TableView
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.dp
+import com.example.data.Cadence
+import com.example.data.MachineEntity
+import com.example.data.ServiceEntryType
+import com.example.data.ServiceLogWithParts
+import com.example.engine.ExportFilterParams
+import com.example.engine.Formatters
+import com.example.engine.ReportExportEngine
+import com.example.ui.MachinaUiState
+import com.example.ui.components.CadencePill
+import com.example.ui.components.EmptyStateCard
+import com.example.ui.components.KpiMetricCard
+import com.example.ui.components.SeverityPill
+import com.example.ui.components.StatusPill
+import com.example.ui.theme.LocalMachinaColors
+import java.util.concurrent.TimeUnit
+
+enum class ReportPeriodPreset(val label: String, val daysBack: Long?) {
+    ALL("All Time", null),
+    DAYS_7("Last 7d", 7),
+    DAYS_30("Last 30d", 30),
+    DAYS_365("Last 1y", 365)
+}
+
+@Composable
+fun ReportsScreen(
+    state: MachinaUiState,
+    isExpanded: Boolean,
+    onUpdateReportFilter: ((ExportFilterParams) -> ExportFilterParams) -> Unit,
+    onOpenExportSheet: (preferPdf: Boolean) -> Unit,
+    onDeleteLog: (Long) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val params = state.reportFilter
+    val sem = LocalMachinaColors.current
+    val machinesById = remember(state.machines) { state.machines.associateBy { it.id } }
+
+    val dataset = remember(state.machines, state.groups, state.tasks, state.serviceLogs, params) {
+        ReportExportEngine.filterDataset(
+            params = params,
+            machines = state.machines,
+            groups = state.groups,
+            allTasks = state.tasks,
+            allLogs = state.serviceLogs
+        )
+    }
+
+    val totalLogs = dataset.logs.size
+    val malfunctions = dataset.logs.count { it.log.entryType == ServiceEntryType.MALFUNCTION_REPAIR }
+    val totalMinutes = dataset.logs.sumOf { it.log.serviceDurationMinutes }
+    val totalPartsQty = dataset.logs.sumOf { item -> item.parts.sumOf { it.quantity } }
+
+    var showMachineMenu by remember { mutableStateOf(false) }
+    var showPicMenu by remember { mutableStateOf(false) }
+    var showGroupMenu by remember { mutableStateOf(false) }
+    var activePeriod by remember { mutableStateOf(ReportPeriodPreset.ALL) }
+
+    LazyColumn(
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = modifier.fillMaxSize()
+    ) {
+        // Export Action Bar
+        item(key = "export_bar") {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.padding(14.dp)
+                ) {
+                    Text(
+                        text = "Historical Report & Parameterized Export",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        text = "Filter by machine, person in charge, custom group, cadence, or time period below, then export directly to Excel (.xlsx) or PDF.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Button(
+                            onClick = { onOpenExportSheet(false) },
+                            modifier = Modifier
+                                .weight(1f)
+                                .minimumInteractiveComponentSize()
+                                .testTag("export_excel_button")
+                        ) {
+                            Icon(Icons.Filled.TableView, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Export Excel")
+                        }
+                        OutlinedButton(
+                            onClick = { onOpenExportSheet(true) },
+                            modifier = Modifier
+                                .weight(1f)
+                                .minimumInteractiveComponentSize()
+                                .testTag("export_pdf_button")
+                        ) {
+                            Icon(Icons.Filled.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Export PDF")
+                        }
+                    }
+                }
+            }
+        }
+
+        // KPI Grid
+        item(key = "report_kpis") {
+            if (isExpanded) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    KpiMetricCard("Service Logs", "$totalLogs", Icons.Filled.History, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
+                    KpiMetricCard("Malfunctions", "$malfunctions", Icons.Filled.Warning, sem.critical, Modifier.weight(1f))
+                    KpiMetricCard("Service Time", Formatters.formatDuration(totalMinutes), Icons.Filled.Schedule, sem.info, Modifier.weight(1f))
+                    KpiMetricCard("Parts Used", "$totalPartsQty", Icons.Filled.Inventory2, sem.warning, Modifier.weight(1f))
+                }
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        KpiMetricCard("Service Logs", "$totalLogs", Icons.Filled.History, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
+                        KpiMetricCard("Malfunctions", "$malfunctions", Icons.Filled.Warning, sem.critical, Modifier.weight(1f))
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        KpiMetricCard("Service Time", Formatters.formatDuration(totalMinutes), Icons.Filled.Schedule, sem.info, Modifier.weight(1f))
+                        KpiMetricCard("Parts Used", "$totalPartsQty", Icons.Filled.Inventory2, sem.warning, Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+
+        // Parameter Filter Row
+        item(key = "report_filters") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                ) {
+                    // Machine Filter
+                    Box {
+                        val selectedMachine = params.machineId?.let { machinesById[it] }
+                        FilterChip(
+                            selected = selectedMachine != null,
+                            onClick = { showMachineMenu = true },
+                            leadingIcon = { Icon(Icons.Filled.PrecisionManufacturing, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                            label = { Text(selectedMachine?.assetCode ?: "All Machines") },
+                            modifier = Modifier.testTag("report_filter_machine")
+                        )
+                        DropdownMenu(expanded = showMachineMenu, onDismissRequest = { showMachineMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("All Machines") },
+                                onClick = {
+                                    onUpdateReportFilter { it.copy(machineId = null) }
+                                    showMachineMenu = false
+                                }
+                            )
+                            state.machines.forEach { m ->
+                                DropdownMenuItem(
+                                    text = { Text("${m.assetCode} · ${m.name}") },
+                                    onClick = {
+                                        onUpdateReportFilter { it.copy(machineId = m.id) }
+                                        showMachineMenu = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // PIC Filter
+                    Box {
+                        FilterChip(
+                            selected = !params.personInCharge.isNullOrBlank(),
+                            onClick = { showPicMenu = true },
+                            leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                            label = { Text(params.personInCharge ?: "All PICs") },
+                            modifier = Modifier.testTag("report_filter_pic")
+                        )
+                        DropdownMenu(expanded = showPicMenu, onDismissRequest = { showPicMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("All Engineers") },
+                                onClick = {
+                                    onUpdateReportFilter { it.copy(personInCharge = null) }
+                                    showPicMenu = false
+                                }
+                            )
+                            state.knownEngineers.forEach { pic ->
+                                DropdownMenuItem(
+                                    text = { Text(pic) },
+                                    onClick = {
+                                        onUpdateReportFilter { it.copy(personInCharge = pic) }
+                                        showPicMenu = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // Custom Group Filter
+                    Box {
+                        val selGroup = params.customGroupId?.let { gid -> state.groups.find { it.id == gid } }
+                        FilterChip(
+                            selected = selGroup != null,
+                            onClick = { showGroupMenu = true },
+                            label = { Text(selGroup?.name ?: "All Groups") },
+                            modifier = Modifier.testTag("report_filter_group")
+                        )
+                        DropdownMenu(expanded = showGroupMenu, onDismissRequest = { showGroupMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("All Custom Groups") },
+                                onClick = {
+                                    onUpdateReportFilter { it.copy(customGroupId = null) }
+                                    showGroupMenu = false
+                                }
+                            )
+                            state.groups.forEach { g ->
+                                DropdownMenuItem(
+                                    text = { Text(g.name) },
+                                    onClick = {
+                                        onUpdateReportFilter { it.copy(customGroupId = g.id) }
+                                        showGroupMenu = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    TextButton(
+                        onClick = {
+                            activePeriod = ReportPeriodPreset.ALL
+                            onUpdateReportFilter { ExportFilterParams() }
+                        },
+                        modifier = Modifier.minimumInteractiveComponentSize()
+                    ) {
+                        Text("Reset")
+                    }
+                }
+
+                // Entry Type & Period Chips
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                ) {
+                    FilterChip(
+                        selected = params.entryType == null,
+                        onClick = { onUpdateReportFilter { it.copy(entryType = null) } },
+                        label = { Text("All Types") }
+                    )
+                    ServiceEntryType.entries.forEach { type ->
+                        FilterChip(
+                            selected = params.entryType == type,
+                            onClick = {
+                                onUpdateReportFilter {
+                                    it.copy(entryType = if (it.entryType == type) null else type)
+                                }
+                            },
+                            label = { Text(if (type == ServiceEntryType.PREVENTIVE_SERVICE) "Preventive" else "Malfunctions") }
+                        )
+                    }
+                    ReportPeriodPreset.entries.forEach { preset ->
+                        FilterChip(
+                            selected = activePeriod == preset,
+                            onClick = {
+                                activePeriod = preset
+                                val start = preset.daysBack?.let {
+                                    System.currentTimeMillis() - TimeUnit.DAYS.toMillis(it)
+                                }
+                                onUpdateReportFilter { it.copy(startMillis = start, endMillis = null) }
+                            },
+                            label = { Text(preset.label) }
+                        )
+                    }
+                }
+
+                // Cadence Filter Chips
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                ) {
+                    FilterChip(
+                        selected = params.cadence == null,
+                        onClick = { onUpdateReportFilter { it.copy(cadence = null) } },
+                        label = { Text("All Cadences") }
+                    )
+                    Cadence.entries.forEach { cad ->
+                        FilterChip(
+                            selected = params.cadence == cad,
+                            onClick = {
+                                onUpdateReportFilter {
+                                    it.copy(cadence = if (it.cadence == cad) null else cad)
+                                }
+                            },
+                            label = { Text(cad.label) }
+                        )
+                    }
+                }
+            }
+        }
+
+        if (dataset.logs.isEmpty()) {
+            item(key = "empty_logs") {
+                EmptyStateCard(
+                    icon = Icons.Filled.Description,
+                    title = "No historical reports matched",
+                    subtitle = "Clear or adjust the machine, PIC, group, or date filters to inspect service logs."
+                )
+            }
+        } else {
+            items(dataset.logs, key = { "log_${it.log.id}" }) { item ->
+                val machine = machinesById[item.log.machineId]
+                ServiceHistoryReportCard(
+                    item = item,
+                    machine = machine,
+                    onDelete = { onDeleteLog(item.log.id) }
+                )
+            }
+        }
+
+        item(key = "reports_bottom_spacer") {
+            Spacer(Modifier.height(72.dp))
+        }
+    }
+}
+
+@Composable
+private fun ServiceHistoryReportCard(
+    item: ServiceLogWithParts,
+    machine: MachineEntity?,
+    onDelete: () -> Unit
+) {
+    val log = item.log
+    val sem = LocalMachinaColors.current
+    val isMalfunction = log.entryType == ServiceEntryType.MALFUNCTION_REPAIR
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (isMalfunction) sem.critical.copy(alpha = 0.35f) else MaterialTheme.colorScheme.outlineVariant
+        ),
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("report_log_card_${log.id}")
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(14.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                StatusPill(
+                    text = if (isMalfunction) "MALFUNCTION" else "PREVENTIVE",
+                    containerColor = if (isMalfunction) sem.criticalContainer else sem.operationalContainer,
+                    contentColor = if (isMalfunction) sem.critical else sem.operational
+                )
+                SeverityPill(log.severity)
+                log.cadenceSnapshot?.let { CadencePill(it) }
+                Spacer(Modifier.weight(1f))
+                IconButton(onClick = onDelete, modifier = Modifier.testTag("delete_log_${log.id}")) {
+                    Icon(
+                        Icons.Filled.DeleteOutline,
+                        contentDescription = "Delete log",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            Text(log.summaryTitle, style = MaterialTheme.typography.titleMedium)
+
+            if (machine != null) {
+                Text(
+                    text = "${machine.assetCode} · ${machine.name}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            if (log.malfunctionDetails.isNotBlank()) {
+                Text(
+                    text = log.malfunctionDetails,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.horizontalScroll(rememberScrollState())
+            ) {
+                Text(
+                    text = Formatters.formatDateTime(log.completedAtMillis),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.width(3.dp))
+                    Text(log.personInCharge, style = MaterialTheme.typography.labelSmall)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Build, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.width(3.dp))
+                    Text(Formatters.formatDuration(log.serviceDurationMinutes), style = MaterialTheme.typography.labelSmall)
+                }
+                StatusPill(
+                    text = if (log.deadlineWasMet) "On Time" else "Late",
+                    containerColor = if (log.deadlineWasMet) sem.operationalContainer else sem.warningContainer,
+                    contentColor = if (log.deadlineWasMet) sem.operational else sem.warning
+                )
+            }
+
+            if (item.parts.isNotEmpty()) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    item.parts.forEach { part ->
+                        val idStr = if (part.partCode.isNotBlank()) "ID: ${part.partCode} · " else ""
+                        val whStr = if (part.fromWarehouse) " · Warehouse" else ""
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                                Text(
+                                    text = "$idStr${part.partName} × ${part.quantity} ${part.unit}$whStr",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                if (part.partDescription.isNotBlank()) {
+                                    Text(
+                                        text = part.partDescription,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

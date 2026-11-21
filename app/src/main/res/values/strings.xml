@@ -1,0 +1,21 @@
+<resources>
+    <string name="app_name">MachinaLog</string>
+    <string name="nav_tasks">Tasks</string>
+    <string name="nav_todo">To-Do</string>
+    <string name="nav_machines">Machines</string>
+    <string name="nav_warehouse">Parts</string>
+    <string name="nav_reports">Reports</string>
+    <string name="action_sync_backup">Sync &amp; Settings</string>
+    <string name="action_pc_web">PC Web Access</string>
+    <string name="action_export_report">Export Report</string>
+    <string name="action_log_malfunction">Log Malfunction</string>
+    <string name="action_add_task">New Task</string>
+    <string name="action_add_machine">Add Machine</string>
+    <string name="action_add_todo">New Reminder</string>
+    <string name="action_add_warehouse_part">Add Part</string>
+    <string name="action_manage_groups">Manage Groups</string>
+    <string name="notification_channel_reminders_name">Maintenance &amp; To-Do Reminders</string>
+    <string name="notification_channel_reminders_desc">Alerts for upcoming and overdue machine maintenance tasks and engineer to-do reminders.</string>
+    <string name="notification_channel_backup_name">Automatic Backups</string>
+    <string name="notification_channel_backup_desc">Status updates for scheduled offline backup file generation.</string>
+</resources>

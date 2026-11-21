@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MachinaLog — PC Web Portal</title>
+  <style>
+    :root {
+      --bg: #f3f6f9;
+      --surface: #ffffff;
+      --surface-alt: #eef2f6;
+      --border: #d5dee8;
+      --text: #102030;
+      --muted: #52657a;
+      --primary: #1b4965;
+      --primary-fg: #ffffff;
+      --primary-soft: #dcebf7;
+      --ok: #137a47;
+      --ok-soft: #daf4e6;
+      --warn: #b45309;
+      --warn-soft: #fef3c7;
+      --danger: #b91c1c;
+      --danger-soft: #fee2e2;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    [data-theme="dark"] {
+      --bg: #0d151e;
+      --surface: #15212e;
+      --surface-alt: #1b2a3a;
+      --border: #2a3c4f;
+      --text: #e6eef7;
+      --muted: #93a7bd;
+      --primary: #5aa9e6;
+      --primary-fg: #071926;
+      --primary-soft: #1a354b;
+      --ok: #34d399;
+      --ok-soft: #0d3326;
+      --warn: #fbbf24;
+      --warn-soft: #3b2a0b;
+      --danger: #f87171;
+      --danger-soft: #3d1417;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.45;
+    }
+    .app-shell {
+      display: grid;
+      grid-template-columns: 230px 1fr;
+      min-height: 100vh;
+    }
+    @media (max-width: 860px) {
+      .app-shell { grid-template-columns: 1fr; }
+      .sidebar { flex-direction: row; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--border); padding: 10px; }
+      .nav-list { flex-direction: row !important; }
+    }
+    .sidebar {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      padding: 18px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 4px 6px;
+    }
+    .brand-mark {
+      width: 34px; height: 34px; border-radius: 9px;
+      background: var(--primary); color: var(--primary-fg);
+      display: grid; place-items: center;
+      font-weight: 800; font-family: var(--mono);
+    }
+    .brand h1 { font-size: 16px; margin: 0; }
+    .brand small { color: var(--muted); font-size: 11px; display: block; }
+    .nav-list { display: flex; flex-direction: column; gap: 6px; }
+    .nav-btn {
+      display: flex; align-items: center; justify-content: space-between;
+      border: 1px solid transparent; background: transparent; color: var(--text);
+      padding: 10px 12px; border-radius: 10px; cursor: pointer;
+      font-size: 14px; font-weight: 600; text-align: left;
+    }
+    .nav-btn:hover { background: var(--surface-alt); }
+    .nav-btn.active { background: var(--primary-soft); color: var(--primary); border-color: var(--border); }
+    .main { display: flex; flex-direction: column; min-width: 0; }
+    .topbar {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 12px 22px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+    }
+    .kpi-strip {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px; padding: 16px 22px 0;
+    }
+    .kpi {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px;
+    }
+    .kpi .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .kpi .val { font-size: 22px; font-weight: 700; margin-top: 2px; }
+    .content { padding: 16px 22px 48px; }
+    .card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 12px;
+    }
+    .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .between { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+    .grid-split { display: grid; grid-template-columns: 360px 1fr; gap: 14px; align-items: start; }
+    @media (max-width: 960px) { .grid-split { grid-template-columns: 1fr; } }
+    button, .btn {
+      font-family: var(--sans); font-size: 13px; font-weight: 600;
+      padding: 8px 13px; border-radius: 8px; cursor: pointer;
+      border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    }
+    button:hover { background: var(--surface-alt); }
+    .btn-primary { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
+    .btn-primary:hover { filter: brightness(1.08); background: var(--primary); }
+    .btn-danger { color: var(--danger); border-color: var(--danger); }
+    .btn-sm { padding: 5px 9px; font-size: 12px; }
+    input, select, textarea {
+      font-family: var(--sans); font-size: 13px; color: var(--text);
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+      padding: 8px 10px; width: 100%;
+    }
+    label { font-size: 12px; font-weight: 600; color: var(--muted); display: block; margin-bottom: 4px; }
+    .pill {
+      display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 6px;
+      font-size: 11px; font-weight: 700; font-family: var(--mono); letter-spacing: .02em;
+      background: var(--surface-alt); color: var(--text);
+    }
+    .pill-primary { background: var(--primary-soft); color: var(--primary); }
+    .pill-ok { background: var(--ok-soft); color: var(--ok); }
+    .pill-warn { background: var(--warn-soft); color: var(--warn); }
+    .pill-danger { background: var(--danger-soft); color: var(--danger); }
+    .chip-row { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 12px; }
+    .chip {
+      padding: 5px 11px; border-radius: 999px; font-size: 12px; font-weight: 600;
+      border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer;
+    }
+    .chip.active { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { font-size: 11px; text-transform: uppercase; color: var(--muted); background: var(--surface-alt); }
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(6, 14, 24, 0.58);
+      display: none; align-items: center; justify-content: center; padding: 16px; z-index: 50;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+      width: 100%; max-width: 620px; max-height: 90vh; display: flex; flex-direction: column; overflow: hidden;
+    }
+    .modal-header { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    .modal-body { padding: 16px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+    .modal-footer { padding: 12px 18px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
+    .picker-list { max-height: 240px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+    .picker-item {
+      padding: 8px 10px; border-bottom: 1px solid var(--border); cursor: pointer;
+      display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    }
+    .picker-item:hover { background: var(--surface-alt); }
+    .toast {
+      position: fixed; right: 20px; bottom: 20px; background: var(--primary); color: var(--primary-fg);
+      padding: 10px 16px; border-radius: 10px; font-weight: 600; font-size: 13px; z-index: 80;
+      display: none; box-shadow: 0 8px 24px rgba(0,0,0,0.22);
+    }
+    .muted { color: var(--muted); font-size: 12px; }
+  </style>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">ML</div>
+      <div>
+        <h1>MachinaLog</h1>
+        <small>PC LAN Web Portal</small>
+      </div>
+    </div>
+    <div class="nav-list">
+      <button class="nav-btn active" data-tab="tasks" onclick="switchTab('tasks')">Tasks <span class="pill" id="nav-badge-tasks">0</span></button>
+      <button class="nav-btn" data-tab="todos" onclick="switchTab('todos')">To-Do <span class="pill" id="nav-badge-todos">0</span></button>
+      <button class="nav-btn" data-tab="machines" onclick="switchTab('machines')">Machines <span class="pill" id="nav-badge-machines">0</span></button>
+      <button class="nav-btn" data-tab="warehouse" onclick="switchTab('warehouse')">Warehouse Parts <span class="pill" id="nav-badge-parts">0</span></button>
+      <button class="nav-btn" data-tab="reports" onclick="switchTab('reports')">Reports &amp; Sync</button>
+    </div>
+    <div class="muted" style="margin-top:auto; padding: 6px;">
+      Connected live to Android device Room DB over local Wi-Fi.
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <strong id="page-title">Maintenance Tasks</strong>
+        <span class="pill pill-ok" style="margin-left:8px;">ONLINE</span>
+      </div>
+      <div class="row">
+        <button onclick="openMalfunctionModal()">+ Log Malfunction / Service</button>
+        <button onclick="refreshState()">Refresh</button>
+        <button onclick="toggleTheme()">Theme</button>
+      </div>
+    </header>
+
+    <section class="kpi-strip">
+      <div class="kpi"><div class="lbl">Machines</div><div class="val" id="kpi-machines">0</div></div>
+      <div class="kpi"><div class="lbl">Overdue Tasks</div><div class="val" id="kpi-overdue" style="color:var(--danger)">0</div></div>
+      <div class="kpi"><div class="lbl">Open To-Dos</div><div class="val" id="kpi-todos">0</div></div>
+      <div class="kpi"><div class="lbl">Warehouse Parts</div><div class="val" id="kpi-parts">0</div></div>
+      <div class="kpi"><div class="lbl">History Logs</div><div class="val" id="kpi-logs">0</div></div>
+    </section>
+
+    <section class="content" id="view-root"></section>
+  </main>
+</div>
+
+<div class="modal-backdrop" id="modal-backdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <strong id="modal-title">Modal</strong>
+      <button class="btn-sm" onclick="closeModal()">Close</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer" id="modal-footer"></div>
+  </div>
+</div>
+
+<input type="file" id="quick-upload-xlsx" accept=".xlsx" style="display:none" onchange="handleQuickExcelUpload(this)" />
+<div class="toast" id="toast"></div>
+
+<script>
+const appState = {
+  data: null,
+  tab: 'tasks',
+  pin: localStorage.getItem('machina_pin') || '',
+  taskCadence: 'ALL',
+  taskOverdueOnly: false,
+  taskSearch: '',
+  todoRepeat: 'ALL',
+  todoShowDone: false,
+  machineStatus: 'ALL',
+  machineSearch: '',
+  selectedMachineId: null,
+  partSearch: '',
+  reportFilter: { machineId: '', groupId: '', pic: '', cadence: '', entryType: '', start: '', end: '' },
+  draftParts: []
+};
+
+function esc(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.display = 'block';
+  clearTimeout(window.__toastTimer);
+  window.__toastTimer = setTimeout(() => { el.style.display = 'none'; }, 3200);
+}
+
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute('data-theme');
+  const next = cur === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('machina_theme', next);
+}
+if (localStorage.getItem('machina_theme') === 'dark' ||
+    (!localStorage.getItem('machina_theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+  document.documentElement.setAttribute('data-theme', 'dark');
+}
+
+async function apiFetch(path, options = {}) {
+  const headers = Object.assign({}, options.headers || {});
+  if (appState.pin) headers['X-Machina-Pin'] = appState.pin;
+  const resp = await fetch(path, Object.assign({}, options, { headers }));
+  if (resp.status === 401) {
+    promptPinModal();
+    throw new Error('PIN required');
+  }
+  return resp;
+}
+
+async function apiJson(path, method = 'GET', bodyObj = null) {
+  const opts = { method, headers: {} };
+  if (bodyObj !== null) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(bodyObj);
+  }
+  const resp = await apiFetch(path, opts);
+  const json = await resp.json();
+  if (!resp.ok || json.ok === false) throw new Error(json.message || 'Request failed');
+  return json;
+}
+
+function promptPinModal() {
+  openModal('Enter Device PIN', `
+    <p class="muted">This Android device requires a PIN to access MachinaLog over Wi-Fi.</p>
+    <div><label>PIN Code</label><input id="pin-input" type="password" placeholder="Enter 4-digit PIN" /></div>
+  `, `<button class="btn-primary" onclick="submitPin()">Unlock</button>`);
+}
+
+function submitPin() {
+  appState.pin = document.getElementById('pin-input').value.trim();
+  localStorage.setItem('machina_pin', appState.pin);
+  closeModal();
+  refreshState();
+}
+
+async function refreshState() {
+  try {
+    const ping = await (await fetch('/api/ping', { headers: appState.pin ? { 'X-Machina-Pin': appState.pin } : {} })).json();
+    if (ping.pinRequired && !ping.authorized) {
+      promptPinModal();
+      return;
+    }
+    const data = await apiJson('/api/state');
+    appState.data = data;
+    if (!appState.selectedMachineId && data.machines.length) {
+      appState.selectedMachineId = data.machines[0].id;
+    }
+    updateKpis();
+    renderTab();
+  } catch (e) {
+    if (e.message !== 'PIN required') showToast('Error: ' + e.message);
+  }
+}
+
+function updateKpis() {
+  const d = appState.data;
+  if (!d) return;
+  const now = Date.now();
+  const overdueTasks = d.tasks.filter(t => t.deadlineMillis < now).length;
+  const openTodos = d.todos.filter(td => !td.isCompleted).length;
+  document.getElementById('kpi-machines').textContent = d.machines.length;
+  document.getElementById('kpi-overdue').textContent = overdueTasks;
+  document.getElementById('kpi-todos').textContent = openTodos;
+  document.getElementById('kpi-parts').textContent = d.warehouseParts.length;
+  document.getElementById('kpi-logs').textContent = d.serviceLogs.length;
+
+  document.getElementById('nav-badge-tasks').textContent = overdueTasks || d.tasks.length;
+  document.getElementById('nav-badge-todos').textContent = openTodos;
+  document.getElementById('nav-badge-machines').textContent = d.machines.length;
+  document.getElementById('nav-badge-parts').textContent = d.warehouseParts.length;
+}
+
+function switchTab(tab) {
+  appState.tab = tab;
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  const titles = {
+    tasks: 'Maintenance Tasks',
+    todos: 'Engineer To-Do Reminders',
+    machines: 'Machines & Fleet History',
+    warehouse: 'Warehouse Spare Parts Catalog',
+    reports: 'Reports, Excel/Backup Sync & Groups'
+  };
+  document.getElementById('page-title').textContent = titles[tab] || 'MachinaLog';
+  renderTab();
+}
+
+function fmtDate(ms) {
+  if (!ms) return '-';
+  return new Date(ms).toLocaleString([], { year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+}
+
+function toInputDateTime(ms) {
+  const dt = new Date(ms || Date.now());
+  const pad = n => String(n).padStart(2, '0');
+  return `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+}
+
+function byIdMap(list) {
+  const m = {};
+  (list || []).forEach(x => m[x.id] = x);
+  return m;
+}
+
+function statusPillHtml(status) {
+  if (status === 'MALFUNCTION') return `<span class="pill pill-danger">MALFUNCTION</span>`;
+  if (status === 'MAINTENANCE_DUE') return `<span class="pill pill-warn">MAINT. DUE</span>`;
+  return `<span class="pill pill-ok">OPERATIONAL</span>`;
+}
+
+function renderTab() {
+  const d = appState.data;
+  if (!d) return;
+  const root = document.getElementById('view-root');
+  if (appState.tab === 'tasks') renderTasks(root, d);
+  else if (appState.tab === 'todos') renderTodos(root, d);
+  else if (appState.tab === 'machines') renderMachines(root, d);
+  else if (appState.tab === 'warehouse') renderWarehouse(root, d);
+  else if (appState.tab === 'reports') renderReports(root, d);
+}
+
+// --- 1. TASKS ---
+function renderTasks(root, d) {
+  const mMap = byIdMap(d.machines);
+  const gMap = byIdMap(d.groups);
+  const now = Date.now();
+  const q = appState.taskSearch.trim().toLowerCase();
+  const filtered = d.tasks.filter(t => {
+    const m = mMap[t.machineId];
+    if (appState.taskCadence !== 'ALL' && t.cadence !== appState.taskCadence) return false;
+    if (appState.taskOverdueOnly && t.deadlineMillis >= now) return false;
+    if (q) {
+      const hay = `${t.title} ${t.description} ${t.personInCharge} ${m?.assetCode || ''} ${m?.name || ''}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  root.innerHTML = `
+    <div class="card">
+      <div class="between">
+        <div class="row" style="flex:1; min-width:240px;">
+          <input style="max-width:320px;" placeholder="Search tasks, machine, PIC..." value="${esc(appState.taskSearch)}" oninput="appState.taskSearch=this.value; renderTab()" />
+          <label style="display:inline-flex;align-items:center;gap:6px;margin:0;cursor:pointer;">
+            <input type="checkbox" style="width:auto;" ${appState.taskOverdueOnly ? 'checked' : ''} onchange="appState.taskOverdueOnly=this.checked; renderTab()" />
+            Overdue Only
+          </label>
+        </div>
+        <div class="row">
+          <button class="btn-sm" onclick="triggerQuickExcelImport()">Import Excel (.xlsx)</button>
+          <button class="btn-primary" onclick="openTaskModal()">+ New Task</button>
+        </div>
+      </div>
+      <div class="chip-row">
+        ${['ALL','DAILY','WEEKLY','MONTHLY','YEARLY'].map(c => `<button class="chip ${appState.taskCadence===c?'active':''}" onclick="appState.taskCadence='${c}'; renderTab()">${c}</button>`).join('')}
+      </div>
+      <table>
+        <thead><tr><th>Cadence / Group</th><th>Machine</th><th>Task</th><th>Deadline</th><th>PIC</th><th>Est.</th><th>Actions</th></tr></thead>
+        <tbody>
+          ${filtered.length === 0 ? `<tr><td colspan="7" class="muted">No tasks match the current filter.</td></tr>` :
+            filtered.map(t => {
+              const m = mMap[t.machineId];
+              const g = gMap[t.groupId || m?.groupId];
+              const overdue = t.deadlineMillis < now;
+              return `<tr>
+                <td><span class="pill pill-primary">${esc(t.cadence)}</span>${g ? `<div class="muted" style="margin-top:4px;">${esc(g.name)}</div>` : ''}</td>
+                <td><strong>${esc(m?.assetCode || '-')}</strong><div class="muted">${esc(m?.name || '')}</div></td>
+                <td><strong>${esc(t.title)}</strong><div class="muted">${esc(t.description)}</div></td>
+                <td><span class="pill ${overdue ? 'pill-danger' : 'pill-ok'}">${overdue ? 'OVERDUE' : 'ON SCHEDULE'}</span><div class="muted">${fmtDate(t.deadlineMillis)}</div></td>
+                <td>${esc(t.personInCharge)}</td>
+                <td>${t.estimatedMinutes}m</td>
+                <td>
+                  <div class="row">
+                    <button class="btn-primary btn-sm" onclick="openCompleteTaskModal(${t.id})">Complete</button>
+                    <button class="btn-sm" onclick="openTaskModal(${t.id})">Edit</button>
+                    <button class="btn-sm btn-danger" onclick="deleteTask(${t.id})">Del</button>
+                  </div>
+                </td>
+              </tr>`;
+            }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function openTaskModal(id = null) {
+  const d = appState.data;
+  const t = id ? d.tasks.find(x => x.id === id) : null;
+  const defaultMachineId = t ? t.machineId : (d.machines[0]?.id || 0);
+  openModal(t ? 'Edit Maintenance Task' : 'New Maintenance Task', `
+    <div><label>Machine *</label><select id="t-machine">${d.machines.map(m => `<option value="${m.id}" ${m.id===defaultMachineId?'selected':''}>${esc(m.assetCode)} · ${esc(m.name)}</option>`).join('')}</select></div>
+    <div><label>Custom Group</label><select id="t-group"><option value="">Use Machine's Group</option>${d.groups.map(g => `<option value="${g.id}" ${t?.groupId===g.id?'selected':''}>${esc(g.name)}</option>`).join('')}</select></div>
+    <div><label>Task Title *</label><input id="t-title" value="${esc(t?.title || '')}" /></div>
+    <div><label>Checklist / Description</label><textarea id="t-desc" rows="2">${esc(t?.description || '')}</textarea></div>
+    <div class="grid-2">
+      <div><label>Cadence</label><select id="t-cadence">${['DAILY','WEEKLY','MONTHLY','YEARLY'].map(c => `<option ${t?.cadence===c?'selected':''}>${c}</option>`).join('')}</select></div>
+      <div><label>Deadline</label><input id="t-deadline" type="datetime-local" value="${toInputDateTime(t?.deadlineMillis || (Date.now() + 8*3600*1000))}" /></div>
+    </div>
+    <div class="grid-2">
+      <div><label>Person In Charge</label><input id="t-pic" value="${esc(t?.personInCharge || d.defaultEngineerName)}" /></div>
+      <div><label>Est. Minutes</label><input id="t-est" type="number" value="${t?.estimatedMinutes || 30}" /></div>
+    </div>
+  `, `<button class="btn-primary" onclick="saveTask(${t ? t.id : 0})">Save Task</button>`);
+}
+
+async function saveTask(id) {
+  const title = document.getElementById('t-title').value.trim();
+  if (!title) return showToast('Task title is required');
+  const dlStr = document.getElementById('t-deadline').value;
+  await apiJson('/api/tasks', 'POST', {
+    id,
+    machineId: Number(document.getElementById('t-machine').value),
+    groupId: document.getElementById('t-group').value ? Number(document.getElementById('t-group').value) : null,
+    title,
+    description: document.getElementById('t-desc').value,
+    cadence: document.getElementById('t-cadence').value,
+    deadlineMillis: dlStr ? new Date(dlStr).getTime() : Date.now(),
+    estimatedMinutes: Number(document.getElementById('t-est').value) || 30,
+    personInCharge: document.getElementById('t-pic').value
+  });
+  closeModal(); showToast('Task saved'); refreshState();
+}
+
+async function deleteTask(id) {
+  if (!confirm('Delete this maintenance task?')) return;
+  await apiJson(`/api/tasks/${id}`, 'DELETE');
+  showToast('Task deleted'); refreshState();
+}
+
+// --- SEARCHABLE WAREHOUSE PICKER IN TASK COMPLETION & MALFUNCTION ---
+function renderDraftPartsBlock() {
+  const d = appState.data;
+  return `
+    <div style="border:1px solid var(--border); border-radius:10px; padding:10px; background:var(--surface-alt);">
+      <div class="between" style="margin-bottom:6px;">
+        <strong>Warehouse Spare Parts Used (${appState.draftParts.length})</strong>
+      </div>
+      <div id="draft-parts-selected">
+        ${appState.draftParts.length === 0 ? `<div class="muted" style="margin-bottom:6px;">No spare parts selected yet. Search warehouse catalog below.</div>` :
+          appState.draftParts.map((p, i) => `
+            <div class="between" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:6px 8px;margin-bottom:5px;">
+              <div>
+                <span class="pill pill-primary">${esc(p.partCode)}</span>
+                <strong>${esc(p.partName)}</strong>
+                <div class="muted">${esc(p.partDescription)}</div>
+              </div>
+              <div class="row">
+                <button class="btn-sm" type="button" onclick="adjustDraftPart(${i}, -1)">-</button>
+                <strong>${p.quantity} ${esc(p.unit)}</strong>
+                <button class="btn-sm" type="button" onclick="adjustDraftPart(${i}, 1)">+</button>
+                <button class="btn-sm btn-danger" type="button" onclick="removeDraftPart(${i})">×</button>
+              </div>
+            </div>
+          `).join('')}
+      </div>
+      <label style="margin-top:6px;">Search Warehouse Spare Parts (by Part ID/Code or Description)</label>
+      <input id="picker-query" placeholder="Type code or description (e.g. HF-40, bearing, 24V)..." oninput="renderPickerResults()" />
+      <div class="picker-list" id="picker-results" style="margin-top:6px;"></div>
+    </div>`;
+}
+
+function renderPickerResults() {
+  const el = document.getElementById('picker-results');
+  if (!el) return;
+  const q = (document.getElementById('picker-query')?.value || '').trim().toLowerCase();
+  const tokens = q.split(/\s+/).filter(Boolean);
+  const parts = appState.data.warehouseParts.filter(w => {
+    if (tokens.length === 0) return true;
+    const hay = `${w.partCode} ${w.partName} ${w.partDescription}`.toLowerCase();
+    return tokens.every(t => hay.includes(t));
+  });
+  el.innerHTML = parts.slice(0, 80).map(w => `
+    <div class="picker-item" onclick="selectCatalogPart(${w.id})">
+      <div>
+        <span class="pill pill-primary">${esc(w.partCode)}</span>
+        <span class="pill">${esc(w.defaultUnit)}</span>
+        ${w.partName ? `<strong>${esc(w.partName)}</strong>` : ''}
+        <div class="muted">${esc(w.partDescription)}</div>
+      </div>
+      <button type="button" class="btn-sm btn-primary">+ Select</button>
+    </div>
+  `).join('') || `<div class="muted" style="padding:10px;">No matching warehouse parts found.</div>`;
+}
+
+function selectCatalogPart(partId) {
+  const item = appState.data.warehouseParts.find(w => w.id === partId);
+  if (!item) return;
+  const idx = appState.draftParts.findIndex(p => p.partCode.toLowerCase() === item.partCode.toLowerCase());
+  if (idx >= 0) {
+    appState.draftParts[idx].quantity += 1;
+  } else {
+    appState.draftParts.push({
+      partCode: item.partCode,
+      partName: item.partName || item.partCode,
+      partDescription: item.partDescription,
+      fromWarehouse: true,
+      quantity: 1,
+      unit: item.defaultUnit || 'pcs'
+    });
+  }
+  document.getElementById('draft-parts-wrap').innerHTML = renderDraftPartsBlock();
+  renderPickerResults();
+}
+function adjustDraftPart(idx, delta) {
+  appState.draftParts[idx].quantity = Math.max(1, appState.draftParts[idx].quantity + delta);
+  document.getElementById('draft-parts-wrap').innerHTML = renderDraftPartsBlock();
+  renderPickerResults();
+}
+function removeDraftPart(idx) {
+  appState.draftParts.splice(idx, 1);
+  document.getElementById('draft-parts-wrap').innerHTML = renderDraftPartsBlock();
+  renderPickerResults();
+}
+
+function openCompleteTaskModal(taskId) {
+  const t = appState.data.tasks.find(x => x.id === taskId);
+  const m = appState.data.machines.find(x => x.id === t.machineId);
+  appState.draftParts = [];
+  openModal('Complete & Log Service', `
+    <div><strong>${esc(t.title)}</strong> <span class="muted">(${esc(m?.assetCode || '')} ${esc(m?.name || '')})</span></div>
+    <div class="grid-2">
+      <div><label>Serviced By (PIC)</label><input id="ct-pic" value="${esc(t.personInCharge)}" /></div>
+      <div><label>Actual Service Time (min)</label><input id="ct-min" type="number" value="${t.estimatedMinutes}" /></div>
+    </div>
+    <div><label>Findings / Work Performed</label><textarea id="ct-notes" rows="2"></textarea></div>
+    <div class="row">
+      <label style="display:inline-flex;align-items:center;gap:6px;margin:0;cursor:pointer;">
+        <input id="ct-malf" type="checkbox" style="width:auto;" /> Malfunction discovered
+      </label>
+      <select id="ct-sev" style="width:auto;"><option>LOW</option><option selected>MEDIUM</option><option>HIGH</option><option>CRITICAL</option></select>
+    </div>
+    <div id="draft-parts-wrap">${renderDraftPartsBlock()}</div>
+  `, `<button class="btn-primary" onclick="submitCompleteTask(${taskId})">Complete &amp; Schedule Next</button>`);
+  renderPickerResults();
+}
+
+async function submitCompleteTask(taskId) {
+  await apiJson(`/api/tasks/${taskId}/complete`, 'POST', {
+    personInCharge: document.getElementById('ct-pic').value,
+    actualDurationMinutes: Number(document.getElementById('ct-min').value) || 30,
+    notes: document.getElementById('ct-notes').value,
+    flagMalfunction: document.getElementById('ct-malf').checked,
+    severity: document.getElementById('ct-sev').value,
+    spareParts: appState.draftParts
+  });
+  closeModal(); showToast('Service logged & next cycle scheduled'); refreshState();
+}
+
+// --- 2. TO-DO REMINDERS ---
+function renderTodos(root, d) {
+  const mMap = byIdMap(d.machines);
+  const filtered = d.todos.filter(td => {
+    if (!appState.todoShowDone && td.isCompleted) return false;
+    if (appState.todoRepeat !== 'ALL' && td.repeatRule !== appState.todoRepeat) return false;
+    return true;
+  });
+  root.innerHTML = `
+    <div class="card">
+      <div class="between">
+        <div class="row">
+          <label style="display:inline-flex;align-items:center;gap:6px;margin:0;cursor:pointer;">
+            <input type="checkbox" style="width:auto;" ${appState.todoShowDone?'checked':''} onchange="appState.todoShowDone=this.checked; renderTab()" /> Show Completed
+          </label>
+        </div>
+        <button class="btn-primary" onclick="openTodoModal()">+ New Reminder</button>
+      </div>
+      <div class="chip-row">
+        ${['ALL','ONCE','DAILY','WEEKLY','MONTHLY','YEARLY'].map(r => `<button class="chip ${appState.todoRepeat===r?'active':''}" onclick="appState.todoRepeat='${r}'; renderTab()">${r}</button>`).join('')}
+      </div>
+      <table>
+        <thead><tr><th>Done</th><th>Title</th><th>Repeat</th><th>Priority</th><th>Trigger Date</th><th>PIC</th><th>Actions</th></tr></thead>
+        <tbody>
+          ${filtered.length === 0 ? `<tr><td colspan="7" class="muted">No reminders found.</td></tr>` :
+            filtered.map(td => `<tr>
+              <td><input type="checkbox" style="width:auto;" ${td.isCompleted?'checked':''} onchange="toggleTodo(${td.id})" /></td>
+              <td><strong>${esc(td.title)}</strong><div class="muted">${esc(td.notes)} ${td.machineId && mMap[td.machineId] ? '· ' + esc(mMap[td.machineId].assetCode) : ''}</div></td>
+              <td><span class="pill pill-primary">${esc(td.repeatRule)}</span></td>
+              <td><span class="pill ${td.priority==='URGENT'?'pill-danger':td.priority==='HIGH'?'pill-warn':''}">${esc(td.priority)}</span></td>
+              <td>${fmtDate(td.dueAtMillis)}</td>
+              <td>${esc(td.personInCharge)}</td>
+              <td><div class="row"><button class="btn-sm" onclick="openTodoModal(${td.id})">Edit</button><button class="btn-sm btn-danger" onclick="deleteTodo(${td.id})">Del</button></div></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function openTodoModal(id = null) {
+  const d = appState.data;
+  const td = id ? d.todos.find(x => x.id === id) : null;
+  openModal(td ? 'Edit Reminder' : 'New Reminder', `
+    <div><label>Reminder Title *</label><input id="td-title" value="${esc(td?.title || '')}" /></div>
+    <div><label>Notes</label><textarea id="td-notes" rows="2">${esc(td?.notes || '')}</textarea></div>
+    <div class="grid-2">
+      <div><label>Repeat Rule</label><select id="td-rule">${['ONCE','DAILY','WEEKLY','MONTHLY','YEARLY'].map(r => `<option ${td?.repeatRule===r?'selected':''}>${r}</option>`).join('')}</select></div>
+      <div><label>Priority</label><select id="td-prio">${['NORMAL','HIGH','URGENT'].map(p => `<option ${td?.priority===p?'selected':''}>${p}</option>`).join('')}</select></div>
+    </div>
+    <div class="grid-2">
+      <div><label>Trigger Date &amp; Time</label><input id="td-due" type="datetime-local" value="${toInputDateTime(td?.dueAtMillis || (Date.now()+4*3600*1000))}" /></div>
+      <div><label>PIC</label><input id="td-pic" value="${esc(td?.personInCharge || d.defaultEngineerName)}" /></div>
+    </div>
+    <div><label>Linked Machine (Optional)</label><select id="td-machine"><option value="">None</option>${d.machines.map(m => `<option value="${m.id}" ${td?.machineId===m.id?'selected':''}>${esc(m.assetCode)} · ${esc(m.name)}</option>`).join('')}</select></div>
+  `, `<button class="btn-primary" onclick="saveTodo(${td ? td.id : 0})">Save Reminder</button>`);
+}
+
+async function saveTodo(id) {
+  const title = document.getElementById('td-title').value.trim();
+  if (!title) return showToast('Title is required');
+  const dueStr = document.getElementById('td-due').value;
+  await apiJson('/api/todos', 'POST', {
+    id,
+    title,
+    notes: document.getElementById('td-notes').value,
+    repeatRule: document.getElementById('td-rule').value,
+    priority: document.getElementById('td-prio').value,
+    dueAtMillis: dueStr ? new Date(dueStr).getTime() : Date.now(),
+    personInCharge: document.getElementById('td-pic').value,
+    machineId: document.getElementById('td-machine').value ? Number(document.getElementById('td-machine').value) : null
+  });
+  closeModal(); showToast('Reminder saved'); refreshState();
+}
+async function toggleTodo(id) { await apiJson(`/api/todos/${id}/toggle`, 'POST'); showToast('Reminder updated'); refreshState(); }
+async function deleteTodo(id) { if (confirm('Delete reminder?')) { await apiJson(`/api/todos/${id}`, 'DELETE'); refreshState(); } }
+
+// --- 3. MACHINES ---
+function renderMachines(root, d) {
+  const gMap = byIdMap(d.groups);
+  const q = appState.machineSearch.trim().toLowerCase();
+  const filtered = d.machines.filter(m => {
+    if (appState.machineStatus !== 'ALL' && m.status !== appState.machineStatus) return false;
+    if (q && !`${m.assetCode} ${m.name} ${m.locationZone} ${m.modelInfo}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+  const sel = d.machines.find(m => m.id === appState.selectedMachineId) || filtered[0];
+  const selLogs = sel ? d.serviceLogs.filter(l => l.machineId === sel.id) : [];
+
+  root.innerHTML = `
+    <div class="grid-split">
+      <div class="card">
+        <div class="between" style="margin-bottom:8px;">
+          <strong>Fleet (${filtered.length})</strong>
+          <div class="row">
+            <button class="btn-sm" onclick="triggerQuickExcelImport()">Import Excel</button>
+            <button class="btn-primary btn-sm" onclick="openMachineModal()">+ Add Machine</button>
+          </div>
+        </div>
+        <input placeholder="Search asset code or name..." value="${esc(appState.machineSearch)}" oninput="appState.machineSearch=this.value; renderTab()" />
+        <div class="chip-row">
+          ${['ALL','OPERATIONAL','MAINTENANCE_DUE','MALFUNCTION'].map(s => `<button class="chip ${appState.machineStatus===s?'active':''}" onclick="appState.machineStatus='${s}'; renderTab()">${s.replace('_',' ')}</button>`).join('')}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          ${filtered.map(m => `
+            <div onclick="appState.selectedMachineId=${m.id}; renderTab()" style="cursor:pointer;padding:10px;border-radius:10px;border:1px solid ${sel?.id===m.id?'var(--primary)':'var(--border)'};background:${sel?.id===m.id?'var(--primary-soft)':'var(--surface)'};">
+              <div class="between"><strong>${esc(m.assetCode)}</strong>${statusPillHtml(m.status)}</div>
+              <div style="font-weight:600;margin-top:3px;">${esc(m.name)}</div>
+              <div class="muted">${esc(m.locationZone)} ${gMap[m.groupId] ? '· ' + esc(gMap[m.groupId].name) : ''}</div>
+            </div>
+          `).join('') || `<div class="muted">No machines match.</div>`}
+        </div>
+      </div>
+
+      <div class="card">
+        ${!sel ? `<div class="muted">Select a machine to view service history.</div>` : `
+          <div class="between">
+            <div>
+              <span class="pill pill-primary">${esc(sel.assetCode)}</span> ${statusPillHtml(sel.status)}
+              <h2 style="margin:6px 0 2px;font-size:18px;">${esc(sel.name)}</h2>
+              <div class="muted">${esc(sel.locationZone)} · ${esc(sel.modelInfo)}</div>
+              ${sel.notes ? `<p style="font-size:13px;margin:8px 0 0;">${esc(sel.notes)}</p>` : ''}
+            </div>
+            <div class="row">
+              <button class="btn-primary btn-sm" onclick="openMalfunctionModal(${sel.id})">+ Log Service/Malfunction</button>
+              <button class="btn-sm" onclick="openMachineModal(${sel.id})">Edit</button>
+              <button class="btn-sm btn-danger" onclick="deleteMachine(${sel.id})">Delete</button>
+            </div>
+          </div>
+          <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;" />
+          <strong>Service &amp; Malfunction History (${selLogs.length})</strong>
+          <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;">
+            ${selLogs.map(l => `
+              <div style="border:1px solid var(--border);border-radius:10px;padding:10px;">
+                <div class="between">
+                  <div>
+                    <span class="pill ${l.entryType==='MALFUNCTION_REPAIR'?'pill-danger':'pill-ok'}">${esc(l.entryType)}</span>
+                    <strong>${esc(l.summaryTitle)}</strong>
+                  </div>
+                  <span class="muted">${fmtDate(l.completedAtMillis)} · ${l.serviceDurationMinutes}m · ${esc(l.personInCharge)}</span>
+                </div>
+                ${l.malfunctionDetails ? `<div class="muted" style="margin-top:4px;">${esc(l.malfunctionDetails)}</div>` : ''}
+                ${l.parts.length ? `<div style="margin-top:6px;">${l.parts.map(p => `<span class="pill pill-primary" style="margin-right:4px;">${esc(p.partCode)} ${esc(p.partName)} ×${p.quantity} ${esc(p.unit)}</span>`).join('')}</div>` : ''}
+              </div>
+            `).join('') || `<div class="muted">No service logs recorded for this machine yet.</div>`}
+          </div>
+        `}
+      </div>
+    </div>`;
+}
+
+function openMachineModal(id = null) {
+  const d = appState.data;
+  const m = id ? d.machines.find(x => x.id === id) : null;
+  openModal(m ? 'Edit Machine' : 'Add Machine', `
+    <div class="grid-2">
+      <div><label>Asset Code *</label><input id="m-code" value="${esc(m?.assetCode || '')}" placeholder="e.g. MCH-701" /></div>
+      <div><label>Custom Group</label><select id="m-group"><option value="">Ungrouped</option>${d.groups.map(g => `<option value="${g.id}" ${m?.groupId===g.id?'selected':''}>${esc(g.name)}</option>`).join('')}</select></div>
+    </div>
+    <div><label>Machine Name *</label><input id="m-name" value="${esc(m?.name || '')}" /></div>
+    <div class="grid-2">
+      <div><label>Location / Zone</label><input id="m-zone" value="${esc(m?.locationZone || '')}" /></div>
+      <div><label>Model / Serial No.</label><input id="m-model" value="${esc(m?.modelInfo || '')}" /></div>
+    </div>
+    <div><label>Status</label><select id="m-status">${['OPERATIONAL','MAINTENANCE_DUE','MALFUNCTION'].map(s => `<option ${m?.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
+    <div><label>Notes</label><textarea id="m-notes" rows="2">${esc(m?.notes || '')}</textarea></div>
+  `, `<button class="btn-primary" onclick="saveMachine(${m ? m.id : 0})">Save Machine</button>`);
+}
+
+async function saveMachine(id) {
+  const assetCode = document.getElementById('m-code').value.trim();
+  const name = document.getElementById('m-name').value.trim();
+  if (!assetCode || !name) return showToast('Asset Code and Name are required');
+  await apiJson('/api/machines', 'POST', {
+    id,
+    groupId: document.getElementById('m-group').value ? Number(document.getElementById('m-group').value) : null,
+    assetCode, name,
+    locationZone: document.getElementById('m-zone').value,
+    modelInfo: document.getElementById('m-model').value,
+    status: document.getElementById('m-status').value,
+    notes: document.getElementById('m-notes').value
+  });
+  closeModal(); showToast('Machine saved'); refreshState();
+}
+async function deleteMachine(id) { if (confirm('Delete machine and all its tasks/history?')) { await apiJson(`/api/machines/${id}`, 'DELETE'); refreshState(); } }
+
+function openMalfunctionModal(machineId = null) {
+  const d = appState.data;
+  const defId = machineId || appState.selectedMachineId || (d.machines[0]?.id || 0);
+  appState.draftParts = [];
+  openModal('Log Malfunction / Service Report', `
+    <div><label>Machine *</label><select id="ml-machine">${d.machines.map(m => `<option value="${m.id}" ${m.id===defId?'selected':''}>${esc(m.assetCode)} · ${esc(m.name)}</option>`).join('')}</select></div>
+    <div class="grid-2">
+      <div><label>Entry Type</label><select id="ml-type"><option value="MALFUNCTION_REPAIR">Malfunction / Breakdown</option><option value="PREVENTIVE_SERVICE">Preventive Service</option></select></div>
+      <div><label>Severity</label><select id="ml-sev"><option>LOW</option><option>MEDIUM</option><option selected>HIGH</option><option>CRITICAL</option></select></div>
+    </div>
+    <div><label>Summary Title *</label><input id="ml-title" placeholder="e.g. Hydraulic leak on relief block" /></div>
+    <div><label>Details / Root Cause</label><textarea id="ml-details" rows="2"></textarea></div>
+    <div class="grid-2">
+      <div><label>Person In Charge</label><input id="ml-pic" value="${esc(d.defaultEngineerName)}" /></div>
+      <div><label>Duration (min)</label><input id="ml-min" type="number" value="45" /></div>
+    </div>
+    <div><label>Machine Status After Log</label><select id="ml-status"><option value="OPERATIONAL">Operational</option><option value="MAINTENANCE_DUE">Maint. Due</option><option value="MALFUNCTION">Malfunction</option></select></div>
+    <div id="draft-parts-wrap">${renderDraftPartsBlock()}</div>
+  `, `<button class="btn-primary" onclick="submitMalfunctionLog()">Save Report</button>`);
+  renderPickerResults();
+}
+
+async function submitMalfunctionLog() {
+  const title = document.getElementById('ml-title').value.trim();
+  if (!title) return showToast('Summary title is required');
+  await apiJson('/api/logs', 'POST', {
+    machineId: Number(document.getElementById('ml-machine').value),
+    entryType: document.getElementById('ml-type').value,
+    severity: document.getElementById('ml-sev').value,
+    summaryTitle: title,
+    details: document.getElementById('ml-details').value,
+    personInCharge: document.getElementById('ml-pic').value,
+    durationMinutes: Number(document.getElementById('ml-min').value) || 30,
+    newMachineStatus: document.getElementById('ml-status').value,
+    spareParts: appState.draftParts
+  });
+  closeModal(); showToast('Service report saved'); refreshState();
+}
+
+// --- 4. WAREHOUSE SPARE PARTS ---
+function renderWarehouse(root, d) {
+  const tokens = appState.partSearch.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const filtered = d.warehouseParts.filter(w => {
+    if (!tokens.length) return true;
+    const hay = `${w.partCode} ${w.partName} ${w.partDescription}`.toLowerCase();
+    return tokens.every(t => hay.includes(t));
+  });
+  root.innerHTML = `
+    <div class="card">
+      <div class="between" style="margin-bottom:10px;">
+        <div>
+          <strong>Warehouse Spare Parts Catalog (${filtered.length} / ${d.warehouseParts.length})</strong>
+          <div class="muted">Codes &amp; descriptions master list (no stock quantity tracking)</div>
+        </div>
+        <div class="row">
+          <button onclick="triggerQuickExcelImport()">Import Excel (.xlsx)</button>
+          <button class="btn-primary" onclick="openWarehouseModal()">+ Add Part</button>
+        </div>
+      </div>
+      <input style="margin-bottom:10px;" placeholder="Search by Part Code / ID or Description..." value="${esc(appState.partSearch)}" oninput="appState.partSearch=this.value; renderTab()" />
+      <table>
+        <thead><tr><th>Part ID / Code</th><th>Part Name</th><th>Description</th><th>Default Unit</th><th>Actions</th></tr></thead>
+        <tbody>
+          ${filtered.length === 0 ? `<tr><td colspan="5" class="muted">No matching spare parts.</td></tr>` :
+            filtered.map(w => `<tr>
+              <td><span class="pill pill-primary">${esc(w.partCode)}</span></td>
+              <td><strong>${esc(w.partName || '-')}</strong></td>
+              <td>${esc(w.partDescription)}</td>
+              <td><span class="pill">${esc(w.defaultUnit)}</span></td>
+              <td><div class="row"><button class="btn-sm" onclick="openWarehouseModal(${w.id})">Edit</button><button class="btn-sm btn-danger" onclick="deleteWarehousePart(${w.id})">Del</button></div></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function openWarehouseModal(id = null) {
+  const w = id ? appState.data.warehouseParts.find(x => x.id === id) : null;
+  openModal(w ? 'Edit Warehouse Spare Part' : 'Add Warehouse Spare Part', `
+    <div class="grid-2">
+      <div><label>Spare Part ID / Code *</label><input id="wp-code" value="${esc(w?.partCode || '')}" placeholder="e.g. BRG-6205-2RS" /></div>
+      <div><label>Default Unit</label><input id="wp-unit" value="${esc(w?.defaultUnit || 'pcs')}" /></div>
+    </div>
+    <div><label>Part Name (optional)</label><input id="wp-name" value="${esc(w?.partName || '')}" /></div>
+    <div><label>Spare Part Description *</label><textarea id="wp-desc" rows="3">${esc(w?.partDescription || '')}</textarea></div>
+  `, `<button class="btn-primary" onclick="saveWarehousePart(${w ? w.id : 0})">Save Part</button>`);
+}
+
+async function saveWarehousePart(id) {
+  const partCode = document.getElementById('wp-code').value.trim();
+  const partDescription = document.getElementById('wp-desc').value.trim();
+  const partName = document.getElementById('wp-name').value.trim();
+  if (!partCode || (!partDescription && !partName)) return showToast('Part Code and Description are required');
+  await apiJson('/api/warehouse', 'POST', {
+    id, partCode, partName, partDescription: partDescription || partName,
+    defaultUnit: document.getElementById('wp-unit').value.trim() || 'pcs'
+  });
+  closeModal(); showToast('Warehouse part saved'); refreshState();
+}
+async function deleteWarehousePart(id) { if (confirm('Remove this spare part from catalog?')) { await apiJson(`/api/warehouse/${id}`, 'DELETE'); refreshState(); } }
+
+// --- 5. REPORTS, EXCEL/BACKUP SYNC & GROUPS ---
+function renderReports(root, d) {
+  const rf = appState.reportFilter;
+  const pics = [...new Set([...d.tasks.map(t=>t.personInCharge), ...d.serviceLogs.map(l=>l.personInCharge)].filter(Boolean))].sort();
+  const qs = buildReportQuery();
+
+  root.innerHTML = `
+    <div class="grid-2">
+      <div class="card">
+        <strong>Export Filtered Reports (Excel &amp; PDF)</strong>
+        <div class="muted" style="margin-bottom:10px;">Select parameters and download directly to your PC</div>
+        <div class="grid-2">
+          <div><label>Machine</label><select id="rf-m" onchange="appState.reportFilter.machineId=this.value; renderTab()"><option value="">All Machines</option>${d.machines.map(m=>`<option value="${m.id}" ${rf.machineId==m.id?'selected':''}>${esc(m.assetCode)} · ${esc(m.name)}</option>`).join('')}</select></div>
+          <div><label>Custom Group</label><select id="rf-g" onchange="appState.reportFilter.groupId=this.value; renderTab()"><option value="">All Groups</option>${d.groups.map(g=>`<option value="${g.id}" ${rf.groupId==g.id?'selected':''}>${esc(g.name)}</option>`).join('')}</select></div>
+          <div><label>Person In Charge</label><select id="rf-p" onchange="appState.reportFilter.pic=this.value; renderTab()"><option value="">All Engineers</option>${pics.map(p=>`<option ${rf.pic===p?'selected':''}>${esc(p)}</option>`).join('')}</select></div>
+          <div><label>Cadence</label><select id="rf-c" onchange="appState.reportFilter.cadence=this.value; renderTab()"><option value="">All Cadences</option>${['DAILY','WEEKLY','MONTHLY','YEARLY'].map(c=>`<option ${rf.cadence===c?'selected':''}>${c}</option>`).join('')}</select></div>
+          <div><label>From Date</label><input type="date" value="${esc(rf.start)}" onchange="appState.reportFilter.start=this.value; renderTab()" /></div>
+          <div><label>To Date</label><input type="date" value="${esc(rf.end)}" onchange="appState.reportFilter.end=this.value; renderTab()" /></div>
+        </div>
+        <div class="row" style="margin-top:12px;">
+          <button class="btn-primary" onclick="downloadWithPin('/api/reports/export.xlsx?${qs}', 'MachinaLog_Report.xlsx')">Download Excel (.xlsx)</button>
+          <button onclick="downloadWithPin('/api/reports/export.pdf?${qs}', 'MachinaLog_Report.pdf')">Download PDF (.pdf)</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <strong>Excel Bulk Import &amp; Portable Backup (.json)</strong>
+        <div class="muted" style="margin-bottom:10px;">Upload Excel workbooks or JSON backup files directly from your PC</div>
+        <div class="row" style="margin-bottom:10px;">
+          <button onclick="downloadWithPin('/api/excel/template.xlsx', 'MachinaLog_Import_Template.xlsx')">Download Excel Template (.xlsx)</button>
+          <button onclick="downloadWithPin('/api/backup/export.json', 'machinalog_backup.json')">Download Backup (.json)</button>
+        </div>
+        <div style="margin-bottom:10px;">
+          <label>Import Excel (.xlsx) from PC · Auto-checks duplicates (Warehouse, Machines &amp; Tasks)</label>
+          <div class="row">
+            <input type="file" id="upload-xlsx" accept=".xlsx" style="flex:1;" />
+            <button class="btn-primary btn-sm" onclick="uploadExcel(false)">Smart Merge</button>
+            <button class="btn-sm btn-danger" onclick="uploadExcel(true)">Replace All</button>
+          </div>
+        </div>
+        <div>
+          <label>Restore / Merge Backup (.json) from PC</label>
+          <div class="row">
+            <input type="file" id="upload-json" accept=".json" style="flex:1;" />
+            <button class="btn-primary btn-sm" onclick="uploadBackup('MERGE')">Merge Sync</button>
+            <button class="btn-sm btn-danger" onclick="uploadBackup('REPLACE')">Replace All</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="between" style="margin-bottom:8px;">
+        <strong>Custom Groups (${d.groups.length})</strong>
+        <button class="btn-primary btn-sm" onclick="openGroupModal()">+ Add Group</button>
+      </div>
+      <div class="row">
+        ${d.groups.map(g => `<span class="pill pill-primary" style="padding:6px 10px;">${esc(g.name)} (${esc(g.scope)}) <button style="border:none;background:transparent;padding:0 0 0 6px;color:var(--danger);" onclick="deleteGroup(${g.id})">×</button></span>`).join('') || `<span class="muted">No custom groups created yet.</span>`}
+      </div>
+    </div>`;
+}
+
+function buildReportQuery() {
+  const rf = appState.reportFilter;
+  const p = new URLSearchParams();
+  if (rf.machineId) p.set('machineId', rf.machineId);
+  if (rf.groupId) p.set('customGroupId', rf.groupId);
+  if (rf.pic) p.set('personInCharge', rf.pic);
+  if (rf.cadence) p.set('cadence', rf.cadence);
+  if (rf.start) p.set('startMillis', String(new Date(rf.start + 'T00:00:00').getTime()));
+  if (rf.end) p.set('endMillis', String(new Date(rf.end + 'T23:59:59').getTime()));
+  return p.toString();
+}
+
+async function downloadWithPin(url, fallbackName) {
+  try {
+    const resp = await apiFetch(url);
+    const blob = await resp.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fallbackName;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (e) { showToast('Download failed: ' + e.message); }
+}
+
+function triggerQuickExcelImport() {
+  const input = document.getElementById('quick-upload-xlsx');
+  input.value = '';
+  input.click();
+}
+
+async function handleQuickExcelUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const resp = await apiFetch('/api/excel/import?replace=false', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: await file.arrayBuffer()
+  });
+  const json = await resp.json();
+  if (!resp.ok || !json.ok) return showToast('Error: ' + json.message);
+  showToast(json.message); refreshState();
+}
+
+async function uploadExcel(replace) {
+  const file = document.getElementById('upload-xlsx').files[0];
+  if (!file) return showToast('Select an .xlsx file first');
+  if (replace && !confirm('Replace all existing records with this Excel workbook?')) return;
+  const resp = await apiFetch(`/api/excel/import?replace=${replace}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: await file.arrayBuffer()
+  });
+  const json = await resp.json();
+  if (!resp.ok || !json.ok) return showToast('Error: ' + json.message);
+  showToast(json.message); refreshState();
+}
+
+async function uploadBackup(mode) {
+  const file = document.getElementById('upload-json').files[0];
+  if (!file) return showToast('Select a .json backup file first');
+  if (mode === 'REPLACE' && !confirm('Replace all device records from this backup file?')) return;
+  const resp = await apiFetch(`/api/backup/import?mode=${mode}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: await file.text()
+  });
+  const json = await resp.json();
+  if (!resp.ok || !json.ok) return showToast('Error: ' + json.message);
+  showToast(json.message); refreshState();
+}
+
+function openGroupModal() {
+  openModal('New Custom Group', `
+    <div><label>Group Name *</label><input id="g-name" placeholder="e.g. Assembly Line B" /></div>
+    <div><label>Scope</label><select id="g-scope"><option value="ALL">Machines &amp; Tasks</option><option value="MACHINE">Machines Only</option><option value="TASK">Tasks Only</option></select></div>
+  `, `<button class="btn-primary" onclick="saveGroup()">Save Group</button>`);
+}
+async function saveGroup() {
+  const name = document.getElementById('g-name').value.trim();
+  if (!name) return showToast('Group name is required');
+  await apiJson('/api/groups', 'POST', { name, scope: document.getElementById('g-scope').value, colorKey: 'COBALT' });
+  closeModal(); showToast('Group saved'); refreshState();
+}
+async function deleteGroup(id) { if (confirm('Delete custom group?')) { await apiJson(`/api/groups/${id}`, 'DELETE'); refreshState(); } }
+
+function openModal(title, bodyHtml, footerHtml) {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-body').innerHTML = bodyHtml;
+  document.getElementById('modal-footer').innerHTML = `<button onclick="closeModal()">Cancel</button>` + footerHtml;
+  document.getElementById('modal-backdrop').classList.add('open');
+}
+function closeModal() { document.getElementById('modal-backdrop').classList.remove('open'); }
+
+refreshState();
+</script>
+</body>
+</html>
