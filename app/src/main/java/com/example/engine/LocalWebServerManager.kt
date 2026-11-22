@@ -203,6 +203,7 @@ object LocalWebServerManager {
     ) {
         socket.use { client ->
             client.soTimeout = 15_000
+            client.tcpNoDelay = true
             val req = readHttpRequest(BufferedInputStream(client.getInputStream())) ?: return
             val resp = routeRequest(req, context, dao, repo, prefs)
             writeHttpResponse(client, resp)
@@ -498,23 +499,26 @@ object LocalWebServerManager {
                 req.method == "POST" && req.path == "/api/tasks" -> {
                     val body = decodeJson<WebSaveTaskReq>(req.body) ?: return badRequest()
                     val existing = if (body.id != 0L) dao.getTaskById(body.id) else null
+                    val isNewTask = (existing == null)
                     val cadence = runCatching { Cadence.valueOf(body.cadence) }.getOrDefault(Cadence.ONCE)
                     val prio = runCatching { ReminderPriority.valueOf(body.priority) }.getOrDefault(ReminderPriority.NORMAL)
                     val targetStatus = body.machineStatus?.let { raw ->
                         runCatching { MachineStatus.valueOf(raw) }.getOrNull()
                     }
+                    val cleanTitle = body.title.trim()
+                    val cleanPic = body.personInCharge.trim()
                     repo.saveTask(
                         task = MaintenanceTaskEntity(
                             id = existing?.id ?: 0L,
                             uuid = existing?.uuid ?: java.util.UUID.randomUUID().toString(),
                             machineId = body.machineId,
                             groupId = body.groupId,
-                            title = body.title.trim(),
+                            title = cleanTitle,
                             description = body.description.trim(),
                             cadence = cadence,
                             deadlineMillis = body.deadlineMillis,
                             estimatedMinutes = body.estimatedMinutes.coerceAtLeast(1),
-                            personInCharge = body.personInCharge.trim(),
+                            personInCharge = cleanPic,
                             assistantEngineers = body.assistantEngineers.trim(),
                             priority = prio,
                             reminderEnabled = body.reminderEnabled,
@@ -524,6 +528,17 @@ object LocalWebServerManager {
                         ),
                         machineStatus = targetStatus
                     )
+                    if (isNewTask && prefs.getSnapshot().notificationsEnabled) {
+                        val m = dao.getMachineById(body.machineId)
+                        val mLabel = m?.let { "${it.assetCode} · ${it.name}" }.orEmpty()
+                        NotificationChannels.notifyNewTaskCreated(
+                            context = context,
+                            title = cleanTitle,
+                            machineLabel = mLabel,
+                            personInCharge = cleanPic,
+                            deadlineMillis = body.deadlineMillis
+                        )
+                    }
                     jsonResponse(200, "OK", WebActionResult(true, "Task saved"))
                 }
                 req.method == "DELETE" && req.path.startsWith("/api/tasks/") -> {
@@ -658,6 +673,19 @@ object LocalWebServerManager {
                         jsonResponse(400, "Bad Request", WebActionResult(false, preview.warnings.firstOrNull() ?: "No valid rows found in Excel file"))
                     } else {
                         val result = ExcelImportEngine.commitImport(dao, prefs, preview, replace)
+                        if (result.summary.tasks.newCount > 0 && prefs.getSnapshot().notificationsEnabled) {
+                            val firstNew = preview.tasks.firstOrNull()
+                            if (firstNew != null) {
+                                NotificationChannels.notifyNewTaskCreated(
+                                    context = context,
+                                    title = firstNew.title,
+                                    machineLabel = firstNew.assetCode,
+                                    personInCharge = firstNew.personInCharge,
+                                    deadlineMillis = firstNew.deadlineMillis,
+                                    extraCount = (result.summary.tasks.newCount - 1).coerceAtLeast(0)
+                                )
+                            }
+                        }
                         val missingNote = if (result.summary.missingMachineCodesForTasks.isNotEmpty()) {
                             " · Unknown machine codes skipped: ${result.summary.missingMachineCodesForTasks.joinToString(", ")}"
                         } else ""

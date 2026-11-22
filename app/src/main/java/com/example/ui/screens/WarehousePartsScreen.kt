@@ -41,6 +41,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -60,6 +61,7 @@ import com.example.engine.Formatters
 import com.example.ui.MachinaUiState
 import com.example.ui.components.CompactSearchField
 import com.example.ui.components.EmptyStateCard
+import com.example.ui.components.ListPaginationFooter
 import com.example.ui.components.StatusPill
 import com.example.ui.components.TaskOutcomePill
 
@@ -108,18 +110,24 @@ fun filterWarehouseParts(
 @Composable
 fun WarehousePartsScreen(
     state: MachinaUiState,
+    onSetListPageSize: (Int) -> Unit,
     onAddPart: () -> Unit,
     onEditPart: (WarehousePartEntity) -> Unit,
     onDeletePart: (WarehousePartEntity) -> Unit,
     onImportExcel: () -> Unit
 ) {
     var searchQuery by rememberSaveable { mutableStateOf("") }
+    var currentPage by rememberSaveable { mutableIntStateOf(0) }
     var pendingDelete by remember { mutableStateOf<WarehousePartEntity?>(null) }
     var historyTargetPart by remember { mutableStateOf<WarehousePartEntity?>(null) }
     val machinesById = remember(state.machines) { state.machines.associateBy { it.id } }
+    val pageSize = state.preferences.todoPageSize.let { if (it in listOf(25, 50, 100)) it else 25 }
 
     val filteredParts = remember(state.warehouseParts, searchQuery) {
         filterWarehouseParts(state.warehouseParts, searchQuery)
+    }
+    val pagedParts = remember(filteredParts, currentPage, pageSize) {
+        paginateItems(filteredParts, currentPage, pageSize)
     }
 
     Column(
@@ -194,7 +202,10 @@ fun WarehousePartsScreen(
         // Instant Search by Spare Part ID / Code or Description
         CompactSearchField(
             value = searchQuery,
-            onValueChange = { searchQuery = it },
+            onValueChange = {
+                searchQuery = it
+                currentPage = 0
+            },
             placeholder = "Search spare part ID/code or description...",
             searchTag = "warehouse_search_input",
             modifier = Modifier.fillMaxWidth()
@@ -236,12 +247,30 @@ fun WarehousePartsScreen(
                 contentPadding = PaddingValues(bottom = 96.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(filteredParts, key = { it.id }) { part ->
+                items(pagedParts.items, key = { it.id }) { part ->
                     WarehousePartCard(
                         part = part,
                         onHistory = { historyTargetPart = part },
                         onEdit = { onEditPart(part) },
                         onDelete = { pendingDelete = part }
+                    )
+                }
+
+                item(key = "warehouse_pagination_footer") {
+                    ListPaginationFooter(
+                        startNumber = pagedParts.startNumber,
+                        endNumber = pagedParts.endNumber,
+                        totalItems = pagedParts.totalItems,
+                        safePageIndex = pagedParts.safePageIndex,
+                        totalPages = pagedParts.totalPages,
+                        pageSize = pageSize,
+                        onPageSizeChange = { newSize ->
+                            currentPage = 0
+                            onSetListPageSize(newSize)
+                        },
+                        onPrevPage = { currentPage = (pagedParts.safePageIndex - 1).coerceAtLeast(0) },
+                        onNextPage = { currentPage = (pagedParts.safePageIndex + 1).coerceAtMost(pagedParts.totalPages - 1) },
+                        testTagPrefix = "warehouse"
                     )
                 }
             }

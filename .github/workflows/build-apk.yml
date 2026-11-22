@@ -29,6 +29,9 @@ jobs:
           if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
             echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > debug.keystore
             echo "Restored persistent keystore from ANDROID_KEYSTORE_BASE64 secret."
+          elif [ -f "debug.keystore.base64" ]; then
+            tr -d '\r\n' < debug.keystore.base64 | base64 --decode > debug.keystore
+            echo "Decoded persistent keystore from repository debug.keystore.base64."
           else
             keytool -genkey -v \
               -keystore debug.keystore \

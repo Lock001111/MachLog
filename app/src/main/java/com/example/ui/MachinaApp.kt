@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddTask
 import androidx.compose.material.icons.filled.Assessment
@@ -24,7 +25,7 @@ import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Engineering
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.PrecisionManufacturing
-import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.material.icons.outlined.Assessment
 import androidx.compose.material.icons.outlined.Engineering
@@ -86,6 +87,7 @@ import com.example.ui.screens.EngineerEditorDialog
 import com.example.ui.screens.EngineersScreen
 import com.example.ui.screens.MachinesScreen
 import com.example.ui.screens.ReportsScreen
+import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.TasksScreen
 import com.example.ui.screens.WarehousePartsScreen
 import com.example.ui.sheets.AppUpdateAvailableDialog
@@ -97,7 +99,6 @@ import com.example.ui.sheets.MachineEditorDialog
 import com.example.ui.sheets.ManageGroupsDialog
 import com.example.ui.sheets.PcWebPortalDialog
 import com.example.ui.sheets.RejectTaskDialog
-import com.example.ui.sheets.SyncBackupSettingsDialog
 import com.example.ui.sheets.TaskEditorDialog
 import com.example.ui.sheets.TodoEditorDialog
 import com.example.ui.sheets.WarehousePartEditorDialog
@@ -108,6 +109,7 @@ const val ROUTE_MACHINES = "machines"
 const val ROUTE_WAREHOUSE = "warehouse"
 const val ROUTE_ENGINEERS = "engineers"
 const val ROUTE_REPORTS = "reports"
+const val ROUTE_SETTINGS = "settings"
 
 private data class NavDestination(
     val route: String,
@@ -162,7 +164,6 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
     var exportPreferPdf by remember { mutableStateOf(false) }
     var pendingExportParams by remember { mutableStateOf(ExportFilterParams()) }
 
-    var showSyncSettings by remember { mutableStateOf(false) }
     var showPcWebDialog by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
@@ -258,8 +259,9 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
     }
 
     val now = System.currentTimeMillis()
-    val overdueTasksCount = remember(state.tasks, now) { state.tasks.count { it.deadlineMillis < now } }
-    val overdueTodosCount = remember(state.todos, now) { state.todos.count { !it.isCompleted && it.dueAtMillis < now } }
+    val approachingOrOverdueTasksCount = remember(state.tasks, now) {
+        countApproachingOrOverdueTasks(state.tasks, now)
+    }
 
     fun navigateToTab(route: String) {
         navController.navigate(route) {
@@ -284,9 +286,22 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                         containerColor = MaterialTheme.colorScheme.surface,
                         titleContentColor = MaterialTheme.colorScheme.onSurface
                     ),
+                    navigationIcon = {
+                        if (currentRoute == ROUTE_SETTINGS) {
+                            IconButton(
+                                onClick = { navController.popBackStack() },
+                                modifier = Modifier.testTag("topbar_back_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back"
+                                )
+                            }
+                        }
+                    },
                     title = {
                         Text(
-                            text = stringResource(R.string.app_name),
+                            text = if (currentRoute == ROUTE_SETTINGS) "Settings" else stringResource(R.string.app_name),
                             style = MaterialTheme.typography.titleLarge
                         )
                     },
@@ -328,23 +343,37 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                         }
                         IconButton(
                             onClick = {
-                                viewModel.refreshLocalBackups()
-                                showSyncSettings = true
+                                if (currentRoute == ROUTE_SETTINGS) {
+                                    navController.popBackStack()
+                                } else {
+                                    viewModel.refreshLocalBackups()
+                                    navController.navigate(ROUTE_SETTINGS) {
+                                        launchSingleTop = true
+                                    }
+                                }
                             },
                             modifier = Modifier.testTag("topbar_sync_settings_button")
                         ) {
-                            Icon(Icons.Filled.Sync, contentDescription = stringResource(R.string.action_sync_backup))
+                            Icon(
+                                imageVector = Icons.Filled.Settings,
+                                contentDescription = stringResource(R.string.action_sync_backup),
+                                tint = if (currentRoute == ROUTE_SETTINGS) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                }
+                            )
                         }
                     }
                 )
             },
             bottomBar = {
-                if (!useNavRail) {
+                if (!useNavRail && currentRoute != ROUTE_SETTINGS) {
                     NavigationBar {
                         TopDestinations.forEach { dest ->
                             val selected = currentRoute == dest.route
                             val badgeCount = when (dest.route) {
-                                ROUTE_TASKS -> overdueTasksCount + overdueTodosCount
+                                ROUTE_TASKS -> approachingOrOverdueTasksCount
                                 else -> 0
                             }
                             NavigationBarItem(
@@ -446,7 +475,7 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                         TopDestinations.forEach { dest ->
                             val selected = currentRoute == dest.route
                             val badgeCount = when (dest.route) {
-                                ROUTE_TASKS -> overdueTasksCount + overdueTodosCount
+                                ROUTE_TASKS -> approachingOrOverdueTasksCount
                                 else -> 0
                             }
                             NavigationRailItem(
@@ -521,7 +550,7 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                                     )
                                 },
                                 onUpdateTodoFilter = viewModel::updateTodoFilter,
-                                onSetTodoPageSize = viewModel::setTodoPageSize,
+                                onSetListPageSize = viewModel::setListPageSize,
                                 onToggleTodoComplete = viewModel::toggleTodoComplete,
                                 onAddTodo = {
                                     editingTodo = null
@@ -541,6 +570,7 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                                 state = state,
                                 isExpanded = isExpandedWidth,
                                 onUpdateFilter = viewModel::updateMachineFilter,
+                                onSetListPageSize = viewModel::setListPageSize,
                                 onSelectMachine = viewModel::selectMachine,
                                 onAddMachine = {
                                     editingMachine = null
@@ -574,6 +604,7 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                         composable(ROUTE_WAREHOUSE) {
                             WarehousePartsScreen(
                                 state = state,
+                                onSetListPageSize = viewModel::setListPageSize,
                                 onAddPart = {
                                     editingWarehousePart = null
                                     showWarehousePartEditor = true
@@ -597,6 +628,7 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                         composable(ROUTE_ENGINEERS) {
                             EngineersScreen(
                                 state = state,
+                                onSetListPageSize = viewModel::setListPageSize,
                                 onAddEngineer = {
                                     editingEngineer = null
                                     showEngineerEditor = true
@@ -629,6 +661,7 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                             ReportsScreen(
                                 state = state,
                                 isExpanded = isExpandedWidth,
+                                onSetListPageSize = viewModel::setListPageSize,
                                 onUpdateReportFilter = viewModel::updateReportFilter,
                                 onOpenExportSheet = { preferPdf ->
                                     exportPreferPdf = preferPdf
@@ -636,6 +669,51 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                                     showExportDialog = true
                                 },
                                 onDeleteLog = viewModel::deleteServiceLog
+                            )
+                        }
+                        composable(ROUTE_SETTINGS) {
+                            SettingsScreen(
+                                state = state,
+                                onNavigateBack = { navController.popBackStack() },
+                                onRequestNotificationPermission = {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                    }
+                                },
+                                onSetNotificationsEnabled = viewModel::setNotificationsEnabled,
+                                onTriggerReminderCheck = viewModel::triggerTestReminderCheck,
+                                onSetAutoBackupFrequency = viewModel::setAutoBackupFrequency,
+                                onPickAutoBackupFolder = { pickAutoBackupFolderLauncher.launch(null) },
+                                onRunAutoBackupNow = viewModel::triggerAutoBackupNow,
+                                onExportManualBackupFile = {
+                                    createBackupLauncher.launch("machinalog_backup_${Formatters.formatFileStamp()}.json")
+                                },
+                                onShareManualBackupFile = viewModel::shareManualBackupFile,
+                                onImportBackupFile = {
+                                    openBackupLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                                },
+                                onRestoreLocalBackup = viewModel::loadBackupPreviewFromFile,
+                                onShareLocalBackup = viewModel::shareExistingLocalBackup,
+                                onImportExcelFile = {
+                                    openExcelLauncher.launch(
+                                        arrayOf(
+                                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            "application/vnd.ms-excel",
+                                            "*/*"
+                                        )
+                                    )
+                                },
+                                onSaveExcelTemplate = {
+                                    createExcelTemplateLauncher.launch("MachinaLog_Import_Template.xlsx")
+                                },
+                                onSetEngineerName = viewModel::setDefaultEngineerName,
+                                onResetSampleData = viewModel::resetSampleData,
+                                onOpenPcWebPortal = {
+                                    viewModel.refreshPcWebAddresses()
+                                    showPcWebDialog = true
+                                },
+                                onSetAutoCheckUpdates = viewModel::setAutoCheckUpdates,
+                                onCheckForUpdates = { viewModel.checkForUpdates(manual = true) }
                             )
                         }
                     }
@@ -775,53 +853,6 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                 viewModel.shareExportReport(isPdf, params)
                 showExportDialog = false
             }
-        )
-    }
-
-    if (showSyncSettings) {
-        SyncBackupSettingsDialog(
-            state = state,
-            onDismiss = { showSyncSettings = false },
-            onRequestNotificationPermission = {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                }
-            },
-            onSetNotificationsEnabled = viewModel::setNotificationsEnabled,
-            onTriggerReminderCheck = viewModel::triggerTestReminderCheck,
-            onSetAutoBackupFrequency = viewModel::setAutoBackupFrequency,
-            onPickAutoBackupFolder = { pickAutoBackupFolderLauncher.launch(null) },
-            onRunAutoBackupNow = viewModel::triggerAutoBackupNow,
-            onExportManualBackupFile = {
-                createBackupLauncher.launch("machinalog_backup_${Formatters.formatFileStamp()}.json")
-            },
-            onShareManualBackupFile = viewModel::shareManualBackupFile,
-            onImportBackupFile = {
-                openBackupLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
-            },
-            onRestoreLocalBackup = viewModel::loadBackupPreviewFromFile,
-            onShareLocalBackup = viewModel::shareExistingLocalBackup,
-            onImportExcelFile = {
-                openExcelLauncher.launch(
-                    arrayOf(
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        "application/vnd.ms-excel",
-                        "*/*"
-                    )
-                )
-            },
-            onSaveExcelTemplate = {
-                createExcelTemplateLauncher.launch("MachinaLog_Import_Template.xlsx")
-            },
-            onSetEngineerName = viewModel::setDefaultEngineerName,
-            onResetSampleData = viewModel::resetSampleData,
-            onOpenPcWebPortal = {
-                showSyncSettings = false
-                viewModel.refreshPcWebAddresses()
-                showPcWebDialog = true
-            },
-            onSetAutoCheckUpdates = viewModel::setAutoCheckUpdates,
-            onCheckForUpdates = { viewModel.checkForUpdates(manual = true) }
         )
     }
 

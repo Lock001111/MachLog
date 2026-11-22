@@ -57,8 +57,26 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
+import java.util.concurrent.TimeUnit
+
 enum class TaskGroupBy(val label: String) {
     CUSTOM_GROUP("Custom Group"),
+    CADENCE("Cadence"),
+    MACHINE("Machine"),
+    PIC("Person in Charge"),
+    NONE("Flat List")
+}
+
+enum class TodoGroupBy(val label: String) {
+    SOURCE("Task vs Plain Reminder"),
+    PRIORITY("Priority"),
+    PIC("Person in Charge"),
+    NONE("Flat List")
+}
+
+enum class HistoryGroupBy(val label: String) {
+    CUSTOM_GROUP("Custom Group"),
+    OUTCOME("Outcome (Done / Rejected)"),
     CADENCE("Cadence"),
     MACHINE("Machine"),
     PIC("Person in Charge"),
@@ -71,6 +89,22 @@ enum class MachineGroupBy(val label: String) {
     NONE("Flat List")
 }
 
+fun isTaskApproachingOrOverdue(task: MaintenanceTaskEntity, nowMillis: Long): Boolean {
+    if (task.deadlineMillis < nowMillis) return true
+    val remaining = task.deadlineMillis - nowMillis
+    if (remaining <= TimeUnit.HOURS.toMillis(24)) return true
+    if (task.reminderEnabled) {
+        val leadMs = TimeUnit.HOURS.toMillis(task.reminderLeadHours.coerceAtLeast(1).toLong())
+        if (remaining <= leadMs) return true
+    }
+    return false
+}
+
+fun countApproachingOrOverdueTasks(
+    tasks: List<MaintenanceTaskEntity>,
+    nowMillis: Long = System.currentTimeMillis()
+): Int = tasks.count { isTaskApproachingOrOverdue(it, nowMillis) }
+
 data class TasksFilterState(
     val cadence: Cadence? = null,
     val priority: ReminderPriority? = null,
@@ -79,7 +113,8 @@ data class TasksFilterState(
     val picFilter: String? = null,
     val searchQuery: String = "",
     val groupBy: TaskGroupBy = TaskGroupBy.CUSTOM_GROUP,
-    val sortAscending: Boolean = true
+    val sortAscending: Boolean = true,
+    val currentPage: Int = 0
 )
 
 data class TodoFilterState(
@@ -89,6 +124,7 @@ data class TodoFilterState(
     val picFilter: String? = null,
     val showCompleted: Boolean = false,
     val searchQuery: String = "",
+    val groupBy: TodoGroupBy = TodoGroupBy.SOURCE,
     val sortAscending: Boolean = true,
     val currentPage: Int = 0
 )
@@ -100,14 +136,17 @@ data class HistoryFilterState(
     val groupId: Long? = null,
     val picFilter: String? = null,
     val searchQuery: String = "",
-    val sortAscending: Boolean = false
+    val groupBy: HistoryGroupBy = HistoryGroupBy.CUSTOM_GROUP,
+    val sortAscending: Boolean = false,
+    val currentPage: Int = 0
 )
 
 data class MachineFilterState(
     val status: MachineStatus? = null,
     val groupId: Long? = null,
     val groupBy: MachineGroupBy = MachineGroupBy.CUSTOM_GROUP,
-    val searchQuery: String = ""
+    val searchQuery: String = "",
+    val currentPage: Int = 0
 )
 
 data class UpdateUiBundle(
@@ -370,9 +409,16 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setTodoPageSize(size: Int) {
+        setListPageSize(size)
+    }
+
+    fun setListPageSize(size: Int) {
         viewModelScope.launch {
             prefs.setTodoPageSize(size)
+            _tasksFilter.value = _tasksFilter.value.copy(currentPage = 0)
             _todoFilter.value = _todoFilter.value.copy(currentPage = 0)
+            _historyFilter.value = _historyFilter.value.copy(currentPage = 0)
+            _machineFilter.value = _machineFilter.value.copy(currentPage = 0)
         }
     }
 
@@ -569,6 +615,17 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
                 )
             }
             repo.saveTask(entity, machineStatus)
+            if (id == 0L && uiState.value.preferences.notificationsEnabled) {
+                val m = uiState.value.machines.find { it.id == machineId }
+                val mLabel = m?.let { "${it.assetCode} · ${it.name}" }.orEmpty()
+                NotificationChannels.notifyNewTaskCreated(
+                    context = getApplication(),
+                    title = entity.title,
+                    machineLabel = mLabel,
+                    personInCharge = entity.personInCharge,
+                    deadlineMillis = entity.deadlineMillis
+                )
+            }
             MaintenanceReminderScheduler.triggerImmediateReminderCheck(getApplication())
             _events.emit(UiEvent.Snackbar("Task \"${entity.title}\" saved"))
         }
@@ -942,6 +999,19 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
             _isBusy.value = true
             val result = withContext(Dispatchers.IO) {
                 ExcelImportEngine.commitImport(dao, prefs, preview, replaceExisting)
+            }
+            if (result.summary.tasks.newCount > 0 && uiState.value.preferences.notificationsEnabled) {
+                val firstNew = preview.tasks.firstOrNull()
+                if (firstNew != null) {
+                    NotificationChannels.notifyNewTaskCreated(
+                        context = getApplication(),
+                        title = firstNew.title,
+                        machineLabel = firstNew.assetCode,
+                        personInCharge = firstNew.personInCharge,
+                        deadlineMillis = firstNew.deadlineMillis,
+                        extraCount = (result.summary.tasks.newCount - 1).coerceAtLeast(0)
+                    )
+                }
             }
             _pendingExcelImportPreview.value = null
             _isBusy.value = false

@@ -21,18 +21,14 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.TableView
 import androidx.compose.material3.AlertDialog
@@ -65,8 +61,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.example.BuildConfig
-import com.example.data.AutoBackupFrequency
 import com.example.data.Cadence
 import com.example.data.ServiceEntryType
 import com.example.data.TaskOutcome
@@ -75,14 +69,11 @@ import com.example.engine.CategoryDiffStats
 import com.example.engine.ExcelImportPreview
 import com.example.engine.ExportFilterParams
 import com.example.engine.Formatters
-import com.example.engine.NotificationChannels
 import com.example.engine.PortableBackupPackage
 import com.example.engine.ReportExportEngine
 import com.example.engine.RestoreMode
 import com.example.engine.WebPortalStatus
 import com.example.ui.MachinaUiState
-import com.example.ui.components.EngineerPickerField
-import java.io.File
 import java.util.Calendar
 
 @Composable
@@ -419,340 +410,6 @@ fun ExportReportDialog(
     )
 }
 
-@Composable
-fun SyncBackupSettingsDialog(
-    state: MachinaUiState,
-    onDismiss: () -> Unit,
-    onRequestNotificationPermission: () -> Unit,
-    onSetNotificationsEnabled: (Boolean) -> Unit,
-    onTriggerReminderCheck: () -> Unit,
-    onSetAutoBackupFrequency: (AutoBackupFrequency) -> Unit,
-    onPickAutoBackupFolder: () -> Unit,
-    onRunAutoBackupNow: () -> Unit,
-    onExportManualBackupFile: () -> Unit,
-    onShareManualBackupFile: () -> Unit,
-    onImportBackupFile: () -> Unit,
-    onRestoreLocalBackup: (File) -> Unit,
-    onShareLocalBackup: (File) -> Unit,
-    onImportExcelFile: () -> Unit,
-    onSaveExcelTemplate: () -> Unit,
-    onSetEngineerName: (String) -> Unit,
-    onResetSampleData: () -> Unit,
-    onOpenPcWebPortal: () -> Unit,
-    onSetAutoCheckUpdates: (Boolean) -> Unit,
-    onCheckForUpdates: () -> Unit
-) {
-    val context = LocalContext.current
-    val hasPermission = NotificationChannels.hasNotificationPermission(context)
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Sync, Backup & Import") },
-        text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier
-                    .heightIn(max = 480.dp)
-                    .verticalScroll(rememberScrollState())
-            ) {
-                // Live PC Browser Portal (Local Wi-Fi)
-                Surface(
-                    color = if (state.webPortalStatus.isRunning) {
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-                    } else {
-                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.padding(12.dp)
-                    ) {
-                        Icon(
-                            Icons.Filled.Computer,
-                            contentDescription = null,
-                            tint = if (state.webPortalStatus.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                "PC Browser Web Portal (Wi-Fi)",
-                                style = MaterialTheme.typography.titleSmall
-                            )
-                            Text(
-                                text = if (state.webPortalStatus.isRunning) {
-                                    "Online · ${state.webPortalStatus.primaryUrl ?: "Port ${state.webPortalStatus.port}"}"
-                                } else {
-                                    "Off · Open MachinaLog in your PC browser over LAN"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        OutlinedButton(
-                            onClick = onOpenPcWebPortal,
-                            modifier = Modifier.minimumInteractiveComponentSize().testTag("sync_open_pc_web_button")
-                        ) {
-                            Text(if (state.webPortalStatus.isRunning) "Manage" else "Start")
-                        }
-                    }
-                }
-
-                // 0. Continuous & First-Time Setup: Excel Import (.xlsx)
-                Text(
-                    "Excel Import (.xlsx) · Auto-Deduplication",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Text(
-                    "Import or re-import updated external lists for Warehouse Inventory, Machine List, Task List, To-Do Reminders, and Groups. Duplicates are checked automatically so only new or changed rows are applied.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    Button(
-                        onClick = onImportExcelFile,
-                        modifier = Modifier.weight(1f).minimumInteractiveComponentSize().testTag("import_excel_button")
-                    ) {
-                        Icon(Icons.Filled.TableView, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Import Excel")
-                    }
-                    OutlinedButton(
-                        onClick = onSaveExcelTemplate,
-                        modifier = Modifier.weight(1f).minimumInteractiveComponentSize().testTag("save_excel_template_button")
-                    ) {
-                        Icon(Icons.Filled.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Save Template")
-                    }
-                }
-
-                HorizontalDivider()
-
-                // 1. Portable Manual & PC Sync + Restore from Backup
-                Text("Backup, Restore & PC File Sync", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-                Text(
-                    "Create a portable .json backup file to transfer to your PC or another Android device, or restore/merge from an existing backup file.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    Button(
-                        onClick = onExportManualBackupFile,
-                        modifier = Modifier.weight(1f).minimumInteractiveComponentSize().testTag("export_backup_file_button")
-                    ) {
-                        Icon(Icons.Filled.Backup, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Save Backup")
-                    }
-                    OutlinedButton(
-                        onClick = onShareManualBackupFile,
-                        modifier = Modifier.weight(1f).minimumInteractiveComponentSize().testTag("share_backup_file_button")
-                    ) {
-                        Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Send to PC")
-                    }
-                }
-                OutlinedButton(
-                    onClick = onImportBackupFile,
-                    modifier = Modifier.fillMaxWidth().minimumInteractiveComponentSize().testTag("import_backup_file_button")
-                ) {
-                    Icon(Icons.Filled.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Restore from Backup (.json)")
-                }
-
-                HorizontalDivider()
-
-                // 2. Automatic Backup
-                Text("Automatic Scheduled Backup", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.horizontalScroll(rememberScrollState())
-                ) {
-                    AutoBackupFrequency.entries.forEach { freq ->
-                        FilterChip(
-                            selected = state.preferences.autoBackupFrequency == freq,
-                            onClick = { onSetAutoBackupFrequency(freq) },
-                            label = { Text(freq.label) },
-                            modifier = Modifier.testTag("autobackup_freq_${freq.name.lowercase()}")
-                        )
-                    }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    OutlinedButton(
-                        onClick = onPickAutoBackupFolder,
-                        modifier = Modifier.weight(1f).minimumInteractiveComponentSize()
-                    ) {
-                        Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text(if (state.preferences.autoBackupTreeUri != null) "Folder Linked" else "Link Folder")
-                    }
-                    OutlinedButton(
-                        onClick = onRunAutoBackupNow,
-                        modifier = Modifier.weight(1f).minimumInteractiveComponentSize().testTag("run_autobackup_now_button")
-                    ) {
-                        Icon(Icons.Filled.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Backup Now")
-                    }
-                }
-                state.preferences.lastAutoBackupMillis?.let { last ->
-                    Text(
-                        text = "Last auto-backup: ${Formatters.formatDateTime(last)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                if (state.localBackups.isNotEmpty()) {
-                    Text("Recent Auto-Backup Snapshots", style = MaterialTheme.typography.labelLarge)
-                    state.localBackups.take(4).forEach { file ->
-                        Surface(
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                            ) {
-                                Text(
-                                    text = file.name,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                TextButton(
-                                    onClick = { onRestoreLocalBackup(file) },
-                                    modifier = Modifier.testTag("restore_snapshot_${file.name}")
-                                ) {
-                                    Text("Restore")
-                                }
-                                TextButton(onClick = { onShareLocalBackup(file) }) {
-                                    Text("Share")
-                                }
-                            }
-                        }
-                    }
-                }
-
-                HorizontalDivider()
-
-                // 3. Notifications & Reminders
-                Text("Maintenance Notifications", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("System Task & To-Do Alerts", style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            if (hasPermission) "Notification permission granted" else "Permission needed on Android 13+",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = state.preferences.notificationsEnabled,
-                        onCheckedChange = { enabled ->
-                            if (enabled && !hasPermission) {
-                                onRequestNotificationPermission()
-                            }
-                            onSetNotificationsEnabled(enabled)
-                        }
-                    )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (!hasPermission) {
-                        OutlinedButton(onClick = onRequestNotificationPermission, modifier = Modifier.weight(1f)) {
-                            Text("Grant Permission")
-                        }
-                    }
-                    OutlinedButton(
-                        onClick = onTriggerReminderCheck,
-                        modifier = Modifier.weight(1f).minimumInteractiveComponentSize().testTag("test_notification_button")
-                    ) {
-                        Icon(Icons.Filled.NotificationsActive, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Check Alerts Now")
-                    }
-                }
-
-                // 4. App Updates (GitHub Releases: Lock001111/MachLog)
-                HorizontalDivider()
-                Text("App Updates (GitHub: Lock001111/MachLog)", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-                Text(
-                    text = "Installed: v${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Auto-check updates on launch", style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            text = "Detects new APK releases automatically from GitHub",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = state.preferences.autoCheckUpdates,
-                        onCheckedChange = onSetAutoCheckUpdates,
-                        modifier = Modifier.testTag("auto_check_updates_switch")
-                    )
-                }
-                OutlinedButton(
-                    onClick = onCheckForUpdates,
-                    enabled = !state.isCheckingUpdate,
-                    modifier = Modifier.fillMaxWidth().minimumInteractiveComponentSize().testTag("check_for_updates_button")
-                ) {
-                    Icon(Icons.Filled.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(if (state.isCheckingUpdate) "Checking GitHub Releases..." else "Check for Updates")
-                }
-                state.updateStatusText?.let { statusLine ->
-                    Text(
-                        text = statusLine,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-                state.preferences.lastUpdateCheckMillis?.let { checkedAt ->
-                    Text(
-                        text = "Last checked: ${Formatters.formatDateTime(checkedAt)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                HorizontalDivider()
-
-                // 5. Default Engineer & Sample Reset
-                EngineerPickerField(
-                    label = "Default Engineer (PIC)",
-                    selectedName = state.preferences.defaultEngineerName,
-                    engineers = state.engineers,
-                    onSelect = onSetEngineerName,
-                    testTag = "sync_default_engineer_picker"
-                )
-
-                TextButton(
-                    onClick = onResetSampleData,
-                    modifier = Modifier.testTag("reset_sample_data_button")
-                ) {
-                    Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Reset / Reload Sample Factory Data")
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Done") }
-        }
-    )
-}
 
 @Composable
 fun ImportBackupPreviewDialog(

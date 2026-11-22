@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -27,6 +28,8 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.NotificationsActive
@@ -51,11 +54,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -73,13 +78,17 @@ import com.example.data.TodoReminderEntity
 import com.example.data.parseEngineerList
 import com.example.engine.Formatters
 import com.example.ui.HistoryFilterState
+import com.example.ui.HistoryGroupBy
 import com.example.ui.MachinaUiState
 import com.example.ui.TodoFilterState
+import com.example.ui.TodoGroupBy
 import com.example.ui.components.CadencePill
+import com.example.ui.components.CollapsibleFilterPanel
 import com.example.ui.components.CompactSearchField
 import com.example.ui.components.EmptyStateCard
 import com.example.ui.components.GroupBadge
 import com.example.ui.components.KpiMetricCard
+import com.example.ui.components.ListPaginationFooter
 import com.example.ui.components.PriorityPill
 import com.example.ui.components.RepeatRulePill
 import com.example.ui.components.SeverityPill
@@ -281,6 +290,8 @@ fun TodoRemindersSubTab(
     val sem = LocalMachinaColors.current
     val pageSize = state.preferences.todoPageSize.let { if (it in listOf(25, 50, 100)) it else 25 }
     var showPicMenu by remember { mutableStateOf(false) }
+    var showGroupByMenu by remember { mutableStateOf(false) }
+    val collapsedGroups = remember { mutableStateMapOf<String, Boolean>() }
 
     val allFeedItems = remember(state.todos, state.tasks, machinesById) {
         buildTodoFeedItems(state.todos, state.tasks, machinesById, TodoFilterState(showCompleted = true))
@@ -303,6 +314,39 @@ fun TodoRemindersSubTab(
     }
     val pagedTodos = remember(filteredTodos, filter.currentPage, pageSize) {
         paginateItems(filteredTodos, filter.currentPage, pageSize)
+    }
+
+    val groupedTodos = remember(pagedTodos.items, filter.groupBy) {
+        when (filter.groupBy) {
+            TodoGroupBy.NONE -> listOf("All Reminders" to pagedTodos.items)
+            TodoGroupBy.SOURCE -> listOfNotNull(
+                pagedTodos.items.filterIsInstance<TodoFeedItem.LinkedTaskReminder>()
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { "From Maintenance Tasks" to it },
+                pagedTodos.items.filterIsInstance<TodoFeedItem.StandaloneTodo>()
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { "Plain To-Do Reminders" to it }
+            )
+            TodoGroupBy.PRIORITY -> listOf(
+                ReminderPriority.URGENT,
+                ReminderPriority.HIGH,
+                ReminderPriority.NORMAL
+            ).mapNotNull { prio ->
+                val list = pagedTodos.items.filter { it.priority == prio }
+                if (list.isEmpty()) null else "${prio.label} Priority" to list
+            }
+            TodoGroupBy.PIC -> pagedTodos.items.groupBy { item ->
+                item.personInCharge.ifBlank { "Unassigned" }
+            }.toList()
+        }
+    }
+
+    val activeFilterCount = remember(filter) {
+        (if (filter.repeatRule != null) 1 else 0) +
+            (if (filter.priority != null) 1 else 0) +
+            (if (filter.groupId != null) 1 else 0) +
+            (if (!filter.picFilter.isNullOrBlank()) 1 else 0) +
+            (if (filter.showCompleted) 1 else 0)
     }
 
     LazyColumn(
@@ -341,81 +385,49 @@ fun TodoRemindersSubTab(
 
         item(key = "todo_filters") {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                CompactSearchField(
-                    value = filter.searchQuery,
-                    onValueChange = { q -> onUpdateFilter { it.copy(searchQuery = q, currentPage = 0) } },
-                    placeholder = "Search reminders, tasks, machine, or PIC...",
-                    searchTag = "todo_search_input",
-                    contentDescription = "Search reminders",
-                    modifier = Modifier.fillMaxWidth()
-                )
-
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    FilterChip(
-                        selected = true,
-                        onClick = { onUpdateFilter { it.copy(sortAscending = !it.sortAscending, currentPage = 0) } },
-                        leadingIcon = {
-                            Icon(Icons.Filled.Sort, contentDescription = null, modifier = Modifier.size(16.dp))
-                        },
-                        label = {
-                            Text(if (filter.sortAscending) "Date ↑ Soonest" else "Date ↓ Latest")
-                        },
-                        modifier = Modifier.testTag("todo_date_sort_chip")
+                    CompactSearchField(
+                        value = filter.searchQuery,
+                        onValueChange = { q -> onUpdateFilter { it.copy(searchQuery = q, currentPage = 0) } },
+                        placeholder = "Search reminders, tasks, machine, or PIC...",
+                        searchTag = "todo_search_input",
+                        contentDescription = "Search reminders",
+                        modifier = Modifier.weight(1f)
                     )
-                    FilterChip(
-                        selected = filter.priority == null,
-                        onClick = { onUpdateFilter { it.copy(priority = null, currentPage = 0) } },
-                        label = { Text("All Priorities") },
-                        modifier = Modifier.testTag("todo_priority_chip_all")
-                    )
-                    ReminderPriority.entries.forEach { prio ->
-                        FilterChip(
-                            selected = filter.priority == prio,
-                            onClick = {
-                                onUpdateFilter {
-                                    it.copy(
-                                        priority = if (it.priority == prio) null else prio,
-                                        currentPage = 0
-                                    )
-                                }
-                            },
-                            label = { Text(prio.label) },
-                            modifier = Modifier.testTag("todo_priority_chip_${prio.name.lowercase()}")
-                        )
-                    }
+
                     Box {
-                        FilterChip(
-                            selected = !filter.picFilter.isNullOrBlank(),
-                            onClick = { showPicMenu = true },
-                            leadingIcon = {
-                                Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(16.dp))
-                            },
-                            label = { Text(filter.picFilter ?: "All PICs") },
-                            modifier = Modifier.testTag("todo_pic_filter_chip")
-                        )
-                        DropdownMenu(
-                            expanded = showPicMenu,
-                            onDismissRequest = { showPicMenu = false }
+                        OutlinedButton(
+                            onClick = { showGroupByMenu = true },
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("todo_group_by_button")
                         ) {
-                            DropdownMenuItem(
-                                text = { Text("All Engineers") },
-                                onClick = {
-                                    onUpdateFilter { it.copy(picFilter = null, currentPage = 0) }
-                                    showPicMenu = false
-                                }
+                            Icon(Icons.Filled.Sort, contentDescription = "Group reminders", modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = when (filter.groupBy) {
+                                    TodoGroupBy.SOURCE -> "Source"
+                                    TodoGroupBy.PRIORITY -> "Priority"
+                                    TodoGroupBy.PIC -> "PIC"
+                                    TodoGroupBy.NONE -> "Flat"
+                                },
+                                maxLines = 1
                             )
-                            state.knownEngineers.forEach { pic ->
+                        }
+                        DropdownMenu(
+                            expanded = showGroupByMenu,
+                            onDismissRequest = { showGroupByMenu = false }
+                        ) {
+                            TodoGroupBy.entries.forEach { mode ->
                                 DropdownMenuItem(
-                                    text = { Text(pic) },
+                                    text = { Text("Group by: ${mode.label}") },
                                     onClick = {
-                                        onUpdateFilter { it.copy(picFilter = pic, currentPage = 0) }
-                                        showPicMenu = false
+                                        onUpdateFilter { it.copy(groupBy = mode) }
+                                        showGroupByMenu = false
                                     }
                                 )
                             }
@@ -423,35 +435,124 @@ fun TodoRemindersSubTab(
                     }
                 }
 
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                ) {
-                    FilterChip(
-                        selected = filter.repeatRule == null,
-                        onClick = { onUpdateFilter { it.copy(repeatRule = null, currentPage = 0) } },
-                        label = { Text("All Schedules") }
-                    )
-                    RepeatRule.entries.forEach { rule ->
+                CollapsibleFilterPanel(
+                    activeFilterCount = activeFilterCount,
+                    onResetFilters = {
+                        onUpdateFilter {
+                            TodoFilterState(
+                                groupBy = it.groupBy,
+                                sortAscending = it.sortAscending,
+                                searchQuery = it.searchQuery
+                            )
+                        }
+                    },
+                    testTagPrefix = "todo",
+                    inlineQuickActions = {
                         FilterChip(
-                            selected = filter.repeatRule == rule,
-                            onClick = {
-                                onUpdateFilter {
-                                    it.copy(
-                                        repeatRule = if (it.repeatRule == rule) null else rule,
-                                        currentPage = 0
+                            selected = true,
+                            onClick = { onUpdateFilter { it.copy(sortAscending = !it.sortAscending, currentPage = 0) } },
+                            leadingIcon = {
+                                Icon(Icons.Filled.Sort, contentDescription = null, modifier = Modifier.size(16.dp))
+                            },
+                            label = {
+                                Text(if (filter.sortAscending) "Date ↑ Soonest" else "Date ↓ Latest")
+                            },
+                            modifier = Modifier.testTag("todo_date_sort_chip")
+                        )
+                        Surface(
+                            color = if (filter.showCompleted) {
+                                MaterialTheme.colorScheme.secondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.clickable {
+                                onUpdateFilter { it.copy(showCompleted = !it.showCompleted, currentPage = 0) }
+                            }
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(end = 10.dp)
+                            ) {
+                                Checkbox(
+                                    checked = filter.showCompleted,
+                                    onCheckedChange = { checked ->
+                                        onUpdateFilter { it.copy(showCompleted = checked, currentPage = 0) }
+                                    },
+                                    modifier = Modifier
+                                        .minimumInteractiveComponentSize()
+                                        .testTag("todo_show_completed_checkbox")
+                                )
+                                Text(
+                                    text = "Done ($completedCount)",
+                                    style = MaterialTheme.typography.labelLarge
+                                )
+                            }
+                        }
+                    }
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                    ) {
+                        FilterChip(
+                            selected = filter.priority == null,
+                            onClick = { onUpdateFilter { it.copy(priority = null, currentPage = 0) } },
+                            label = { Text("All Priorities") },
+                            modifier = Modifier.testTag("todo_priority_chip_all")
+                        )
+                        ReminderPriority.entries.forEach { prio ->
+                            FilterChip(
+                                selected = filter.priority == prio,
+                                onClick = {
+                                    onUpdateFilter {
+                                        it.copy(
+                                            priority = if (it.priority == prio) null else prio,
+                                            currentPage = 0
+                                        )
+                                    }
+                                },
+                                label = { Text(prio.label) },
+                                modifier = Modifier.testTag("todo_priority_chip_${prio.name.lowercase()}")
+                            )
+                        }
+                        Box {
+                            FilterChip(
+                                selected = !filter.picFilter.isNullOrBlank(),
+                                onClick = { showPicMenu = true },
+                                leadingIcon = {
+                                    Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(16.dp))
+                                },
+                                label = { Text(filter.picFilter ?: "All PICs") },
+                                modifier = Modifier.testTag("todo_pic_filter_chip")
+                            )
+                            DropdownMenu(
+                                expanded = showPicMenu,
+                                onDismissRequest = { showPicMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("All Engineers") },
+                                    onClick = {
+                                        onUpdateFilter { it.copy(picFilter = null, currentPage = 0) }
+                                        showPicMenu = false
+                                    }
+                                )
+                                state.knownEngineers.forEach { pic ->
+                                    DropdownMenuItem(
+                                        text = { Text(pic) },
+                                        onClick = {
+                                            onUpdateFilter { it.copy(picFilter = pic, currentPage = 0) }
+                                            showPicMenu = false
+                                        }
                                     )
                                 }
-                            },
-                            label = { Text(rule.label) },
-                            modifier = Modifier.testTag("todo_rule_chip_${rule.name.lowercase()}")
-                        )
+                            }
+                        }
                     }
-                }
 
-                if (state.groups.isNotEmpty()) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier
@@ -459,84 +560,52 @@ fun TodoRemindersSubTab(
                             .horizontalScroll(rememberScrollState())
                     ) {
                         FilterChip(
-                            selected = filter.groupId == null,
-                            onClick = { onUpdateFilter { it.copy(groupId = null, currentPage = 0) } },
-                            label = { Text("All Groups") }
+                            selected = filter.repeatRule == null,
+                            onClick = { onUpdateFilter { it.copy(repeatRule = null, currentPage = 0) } },
+                            label = { Text("All Schedules") }
                         )
-                        state.groups.forEach { group ->
+                        RepeatRule.entries.forEach { rule ->
                             FilterChip(
-                                selected = filter.groupId == group.id,
+                                selected = filter.repeatRule == rule,
                                 onClick = {
                                     onUpdateFilter {
                                         it.copy(
-                                            groupId = if (it.groupId == group.id) null else group.id,
+                                            repeatRule = if (it.repeatRule == rule) null else rule,
                                             currentPage = 0
                                         )
                                     }
                                 },
-                                label = { Text(group.name) },
-                                modifier = Modifier.testTag("todo_group_chip_${group.id}")
+                                label = { Text(rule.label) },
+                                modifier = Modifier.testTag("todo_rule_chip_${rule.name.lowercase()}")
                             )
                         }
                     }
-                }
 
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    onUpdateFilter { it.copy(showCompleted = !it.showCompleted, currentPage = 0) }
-                                }
-                        ) {
-                            Checkbox(
-                                checked = filter.showCompleted,
-                                onCheckedChange = { checked ->
-                                    onUpdateFilter { it.copy(showCompleted = checked, currentPage = 0) }
-                                },
-                                modifier = Modifier
-                                    .minimumInteractiveComponentSize()
-                                    .testTag("todo_show_completed_checkbox")
-                            )
-                            Text(
-                                text = "Show Completed ($completedCount)",
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.weight(1f)
-                            )
-                            if (filteredTodos.isNotEmpty()) {
-                                Text(
-                                    text = "${pagedTodos.startNumber}–${pagedTodos.endNumber} of ${pagedTodos.totalItems}",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-
+                    if (state.groups.isNotEmpty()) {
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.horizontalScroll(rememberScrollState())
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
                         ) {
-                            Text(
-                                text = "Per page:",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            FilterChip(
+                                selected = filter.groupId == null,
+                                onClick = { onUpdateFilter { it.copy(groupId = null, currentPage = 0) } },
+                                label = { Text("All Groups") }
                             )
-                            listOf(25, 50, 100).forEach { sizeOption ->
+                            state.groups.forEach { group ->
                                 FilterChip(
-                                    selected = pageSize == sizeOption,
-                                    onClick = { onSetPageSize(sizeOption) },
-                                    label = { Text("$sizeOption") },
-                                    modifier = Modifier.testTag("todo_page_size_$sizeOption")
+                                    selected = filter.groupId == group.id,
+                                    onClick = {
+                                        onUpdateFilter {
+                                            it.copy(
+                                                groupId = if (it.groupId == group.id) null else group.id,
+                                                currentPage = 0
+                                            )
+                                        }
+                                    },
+                                    label = { Text(group.name) },
+                                    modifier = Modifier.testTag("todo_group_chip_${group.id}")
                                 )
                             }
                         }
@@ -556,79 +625,109 @@ fun TodoRemindersSubTab(
                 )
             }
         } else {
-            items(pagedTodos.items, key = { it.stableKey }) { feedItem ->
-                when (feedItem) {
-                    is TodoFeedItem.StandaloneTodo -> {
-                        val todo = feedItem.todo
-                        val machine = todo.machineId?.let { machinesById[it] }
-                        val group = feedItem.effectiveGroupId?.let { groupsById[it] }
-                        TodoReminderCard(
-                            todo = todo,
-                            machine = machine,
-                            group = group,
-                            nowMillis = now,
-                            onToggleComplete = { onToggleComplete(todo) },
-                            onEdit = { onEditTodo(todo) },
-                            onDelete = { onDeleteTodo(todo) }
-                        )
+            groupedTodos.forEach { (sectionTitle, sectionItems) ->
+                val isCollapsed = collapsedGroups[sectionTitle] == true
+                val sectionOverdue = sectionItems.count { !it.isCompleted && it.dueAtMillis < now }
+
+                if (filter.groupBy != TodoGroupBy.NONE) {
+                    item(key = "todo_group_header_$sectionTitle") {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { collapsedGroups[sectionTitle] = !isCollapsed }
+                                .testTag("todo_group_header_$sectionTitle")
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                            ) {
+                                Text(
+                                    text = sectionTitle,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (sectionOverdue > 0) {
+                                    StatusPill(
+                                        text = "$sectionOverdue OVERDUE",
+                                        containerColor = sem.criticalContainer,
+                                        contentColor = sem.critical
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                }
+                                StatusPill(
+                                    text = "${sectionItems.size}",
+                                    containerColor = MaterialTheme.colorScheme.surface,
+                                    contentColor = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = if (isCollapsed) Icons.Filled.ExpandMore else Icons.Filled.ExpandLess,
+                                    contentDescription = if (isCollapsed) "Expand group" else "Collapse group"
+                                )
+                            }
+                        }
                     }
-                    is TodoFeedItem.LinkedTaskReminder -> {
-                        val task = feedItem.task
-                        val machine = machinesById[task.machineId]
-                        val group = feedItem.effectiveGroupId?.let { groupsById[it] }
-                        LinkedTaskReminderCard(
-                            task = task,
-                            triggerAtMillis = feedItem.triggerAtMillis,
-                            machine = machine,
-                            group = group,
-                            nowMillis = now,
-                            onComplete = { onCompleteTask(task) },
-                            onReject = { onRejectTask(task) },
-                            onEdit = { onEditTask(task) }
-                        )
+                }
+
+                if (!isCollapsed) {
+                    items(sectionItems, key = { it.stableKey }) { feedItem ->
+                        when (feedItem) {
+                            is TodoFeedItem.StandaloneTodo -> {
+                                val todo = feedItem.todo
+                                val machine = todo.machineId?.let { machinesById[it] }
+                                val group = feedItem.effectiveGroupId?.let { groupsById[it] }
+                                TodoReminderCard(
+                                    todo = todo,
+                                    machine = machine,
+                                    group = group,
+                                    nowMillis = now,
+                                    onToggleComplete = { onToggleComplete(todo) },
+                                    onEdit = { onEditTodo(todo) },
+                                    onDelete = { onDeleteTodo(todo) }
+                                )
+                            }
+                            is TodoFeedItem.LinkedTaskReminder -> {
+                                val task = feedItem.task
+                                val machine = machinesById[task.machineId]
+                                val group = feedItem.effectiveGroupId?.let { groupsById[it] }
+                                LinkedTaskReminderCard(
+                                    task = task,
+                                    triggerAtMillis = feedItem.triggerAtMillis,
+                                    machine = machine,
+                                    group = group,
+                                    nowMillis = now,
+                                    onComplete = { onCompleteTask(task) },
+                                    onReject = { onRejectTask(task) },
+                                    onEdit = { onEditTask(task) }
+                                )
+                            }
+                        }
                     }
                 }
             }
 
-            if (pagedTodos.totalPages > 1 || pagedTodos.totalItems > 25) {
-                item(key = "todo_pagination_bar") {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                onUpdateFilter { it.copy(currentPage = (pagedTodos.safePageIndex - 1).coerceAtLeast(0)) }
-                            },
-                            enabled = pagedTodos.safePageIndex > 0,
-                            modifier = Modifier
-                                .minimumInteractiveComponentSize()
-                                .testTag("todo_prev_page_button")
-                        ) {
-                            Text("Prev")
+            item(key = "todo_pagination_footer") {
+                ListPaginationFooter(
+                    startNumber = pagedTodos.startNumber,
+                    endNumber = pagedTodos.endNumber,
+                    totalItems = pagedTodos.totalItems,
+                    safePageIndex = pagedTodos.safePageIndex,
+                    totalPages = pagedTodos.totalPages,
+                    pageSize = pageSize,
+                    onPageSizeChange = onSetPageSize,
+                    onPrevPage = {
+                        onUpdateFilter { it.copy(currentPage = (pagedTodos.safePageIndex - 1).coerceAtLeast(0)) }
+                    },
+                    onNextPage = {
+                        onUpdateFilter {
+                            it.copy(currentPage = (pagedTodos.safePageIndex + 1).coerceAtMost(pagedTodos.totalPages - 1))
                         }
-                        Text(
-                            text = "Page ${pagedTodos.safePageIndex + 1} of ${pagedTodos.totalPages}",
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                        OutlinedButton(
-                            onClick = {
-                                onUpdateFilter {
-                                    it.copy(currentPage = (pagedTodos.safePageIndex + 1).coerceAtMost(pagedTodos.totalPages - 1))
-                                }
-                            },
-                            enabled = pagedTodos.safePageIndex < pagedTodos.totalPages - 1,
-                            modifier = Modifier
-                                .minimumInteractiveComponentSize()
-                                .testTag("todo_next_page_button")
-                        ) {
-                            Text("Next")
-                        }
-                    }
-                }
+                    },
+                    testTagPrefix = "todo"
+                )
             }
         }
 
@@ -970,6 +1069,7 @@ private fun LinkedTaskReminderCard(
 fun TaskHistorySubTab(
     state: MachinaUiState,
     onUpdateFilter: ((HistoryFilterState) -> HistoryFilterState) -> Unit,
+    onSetPageSize: (Int) -> Unit,
     onDeleteLog: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -977,7 +1077,10 @@ fun TaskHistorySubTab(
     val groupsById = remember(state.groups) { state.groups.associateBy { it.id } }
     val filter = state.historyFilter
     val sem = LocalMachinaColors.current
+    val pageSize = state.preferences.todoPageSize.let { if (it in listOf(25, 50, 100)) it else 25 }
     var showPicMenu by remember { mutableStateOf(false) }
+    var showGroupByMenu by remember { mutableStateOf(false) }
+    val collapsedGroups = remember { mutableStateMapOf<String, Boolean>() }
 
     val doneCount = remember(state.serviceLogs) {
         state.serviceLogs.count { it.log.outcome == TaskOutcome.DONE }
@@ -988,6 +1091,40 @@ fun TaskHistorySubTab(
 
     val filteredLogs = remember(state.serviceLogs, filter, machinesById) {
         filterAndSortHistoryLogs(state.serviceLogs, machinesById, filter)
+    }
+    val pagedLogs = remember(filteredLogs, filter.currentPage, pageSize) {
+        paginateItems(filteredLogs, filter.currentPage, pageSize)
+    }
+
+    val groupedLogs = remember(pagedLogs.items, filter.groupBy, machinesById, groupsById) {
+        when (filter.groupBy) {
+            HistoryGroupBy.NONE -> listOf("All History Records" to pagedLogs.items)
+            HistoryGroupBy.OUTCOME -> TaskOutcome.entries.mapNotNull { out ->
+                val list = pagedLogs.items.filter { it.log.outcome == out }
+                if (list.isEmpty()) null else "${out.label} Jobs" to list
+            }
+            HistoryGroupBy.CADENCE -> pagedLogs.items.groupBy { entry ->
+                entry.log.cadenceSnapshot?.let { "${it.label} Maintenance" } ?: "Direct / Ad-Hoc Log"
+            }.toList()
+            HistoryGroupBy.MACHINE -> pagedLogs.items.groupBy { entry ->
+                machinesById[entry.log.machineId]?.let { "${it.assetCode} · ${it.name}" } ?: "Unknown Machine"
+            }.toList()
+            HistoryGroupBy.PIC -> pagedLogs.items.groupBy { entry ->
+                entry.log.personInCharge.ifBlank { "Unassigned" }
+            }.toList()
+            HistoryGroupBy.CUSTOM_GROUP -> pagedLogs.items.groupBy { entry ->
+                val machine = machinesById[entry.log.machineId]
+                machine?.groupId?.let { groupsById[it]?.name } ?: "Ungrouped"
+            }.toList()
+        }
+    }
+
+    val activeFilterCount = remember(filter) {
+        (if (filter.outcome != null) 1 else 0) +
+            (if (filter.priority != null) 1 else 0) +
+            (if (filter.cadence != null) 1 else 0) +
+            (if (filter.groupId != null) 1 else 0) +
+            (if (!filter.picFilter.isNullOrBlank()) 1 else 0)
     }
 
     LazyColumn(
@@ -1026,110 +1163,51 @@ fun TaskHistorySubTab(
 
         item(key = "history_filters") {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                CompactSearchField(
-                    value = filter.searchQuery,
-                    onValueChange = { q -> onUpdateFilter { it.copy(searchQuery = q) } },
-                    placeholder = "Search task, reason, engineer, or part...",
-                    searchTag = "task_history_search_input",
-                    contentDescription = "Search history",
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
-                )
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
                 ) {
-                    FilterChip(
-                        selected = true,
-                        onClick = { onUpdateFilter { it.copy(sortAscending = !it.sortAscending) } },
-                        leadingIcon = {
-                            Icon(Icons.Filled.Sort, contentDescription = null, modifier = Modifier.size(16.dp))
-                        },
-                        label = {
-                            Text(if (filter.sortAscending) "Recorded ↑ Oldest" else "Recorded ↓ Newest")
-                        },
-                        modifier = Modifier.testTag("history_date_sort_chip")
+                    CompactSearchField(
+                        value = filter.searchQuery,
+                        onValueChange = { q -> onUpdateFilter { it.copy(searchQuery = q, currentPage = 0) } },
+                        placeholder = "Search task, reason, engineer, or part...",
+                        searchTag = "task_history_search_input",
+                        contentDescription = "Search history",
+                        modifier = Modifier.weight(1f)
                     )
-                    FilterChip(
-                        selected = filter.outcome == null,
-                        onClick = { onUpdateFilter { it.copy(outcome = null) } },
-                        label = { Text("All (${state.serviceLogs.size})") },
-                        modifier = Modifier.testTag("history_filter_all")
-                    )
-                    FilterChip(
-                        selected = filter.outcome == TaskOutcome.DONE,
-                        onClick = {
-                            onUpdateFilter {
-                                it.copy(outcome = if (it.outcome == TaskOutcome.DONE) null else TaskOutcome.DONE)
-                            }
-                        },
-                        label = { Text("Done ($doneCount)") },
-                        modifier = Modifier.testTag("history_filter_done")
-                    )
-                    FilterChip(
-                        selected = filter.outcome == TaskOutcome.REJECTED,
-                        onClick = {
-                            onUpdateFilter {
-                                it.copy(outcome = if (it.outcome == TaskOutcome.REJECTED) null else TaskOutcome.REJECTED)
-                            }
-                        },
-                        label = { Text("Rejected ($rejectedCount)") },
-                        modifier = Modifier.testTag("history_filter_rejected")
-                    )
-                }
 
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                ) {
-                    FilterChip(
-                        selected = filter.priority == null,
-                        onClick = { onUpdateFilter { it.copy(priority = null) } },
-                        label = { Text("All Priorities") }
-                    )
-                    ReminderPriority.entries.forEach { prio ->
-                        FilterChip(
-                            selected = filter.priority == prio,
-                            onClick = {
-                                onUpdateFilter {
-                                    it.copy(priority = if (it.priority == prio) null else prio)
-                                }
-                            },
-                            label = { Text(prio.label) },
-                            modifier = Modifier.testTag("history_priority_chip_${prio.name.lowercase()}")
-                        )
-                    }
                     Box {
-                        FilterChip(
-                            selected = !filter.picFilter.isNullOrBlank(),
-                            onClick = { showPicMenu = true },
-                            leadingIcon = {
-                                Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(16.dp))
-                            },
-                            label = { Text(filter.picFilter ?: "All PICs") },
-                            modifier = Modifier.testTag("history_pic_filter_chip")
-                        )
-                        DropdownMenu(
-                            expanded = showPicMenu,
-                            onDismissRequest = { showPicMenu = false }
+                        OutlinedButton(
+                            onClick = { showGroupByMenu = true },
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("history_group_by_button")
                         ) {
-                            DropdownMenuItem(
-                                text = { Text("All Engineers") },
-                                onClick = {
-                                    onUpdateFilter { it.copy(picFilter = null) }
-                                    showPicMenu = false
-                                }
+                            Icon(Icons.Filled.Sort, contentDescription = "Group history", modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = when (filter.groupBy) {
+                                    HistoryGroupBy.CUSTOM_GROUP -> "Custom Group"
+                                    HistoryGroupBy.OUTCOME -> "Outcome"
+                                    HistoryGroupBy.CADENCE -> "Cadence"
+                                    HistoryGroupBy.MACHINE -> "Machine"
+                                    HistoryGroupBy.PIC -> "PIC"
+                                    HistoryGroupBy.NONE -> "Flat List"
+                                },
+                                maxLines = 1
                             )
-                            state.knownEngineers.forEach { pic ->
+                        }
+                        DropdownMenu(
+                            expanded = showGroupByMenu,
+                            onDismissRequest = { showGroupByMenu = false }
+                        ) {
+                            HistoryGroupBy.entries.forEach { mode ->
                                 DropdownMenuItem(
-                                    text = { Text(pic) },
+                                    text = { Text("Group by: ${mode.label}") },
                                     onClick = {
-                                        onUpdateFilter { it.copy(picFilter = pic) }
-                                        showPicMenu = false
+                                        onUpdateFilter { it.copy(groupBy = mode) }
+                                        showGroupByMenu = false
                                     }
                                 )
                             }
@@ -1137,32 +1215,32 @@ fun TaskHistorySubTab(
                     }
                 }
 
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                ) {
-                    FilterChip(
-                        selected = filter.cadence == null,
-                        onClick = { onUpdateFilter { it.copy(cadence = null) } },
-                        label = { Text("All Cadences") }
-                    )
-                    Cadence.entries.forEach { cad ->
+                CollapsibleFilterPanel(
+                    activeFilterCount = activeFilterCount,
+                    onResetFilters = {
+                        onUpdateFilter {
+                            HistoryFilterState(
+                                groupBy = it.groupBy,
+                                sortAscending = it.sortAscending,
+                                searchQuery = it.searchQuery
+                            )
+                        }
+                    },
+                    testTagPrefix = "history",
+                    inlineQuickActions = {
                         FilterChip(
-                            selected = filter.cadence == cad,
-                            onClick = {
-                                onUpdateFilter {
-                                    it.copy(cadence = if (it.cadence == cad) null else cad)
-                                }
+                            selected = true,
+                            onClick = { onUpdateFilter { it.copy(sortAscending = !it.sortAscending, currentPage = 0) } },
+                            leadingIcon = {
+                                Icon(Icons.Filled.Sort, contentDescription = null, modifier = Modifier.size(16.dp))
                             },
-                            label = { Text(cad.label) },
-                            modifier = Modifier.testTag("history_cadence_chip_${cad.name.lowercase()}")
+                            label = {
+                                Text(if (filter.sortAscending) "Recorded ↑ Oldest" else "Recorded ↓ Newest")
+                            },
+                            modifier = Modifier.testTag("history_date_sort_chip")
                         )
                     }
-                }
-
-                if (state.groups.isNotEmpty()) {
+                ) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier
@@ -1170,21 +1248,154 @@ fun TaskHistorySubTab(
                             .horizontalScroll(rememberScrollState())
                     ) {
                         FilterChip(
-                            selected = filter.groupId == null,
-                            onClick = { onUpdateFilter { it.copy(groupId = null) } },
-                            label = { Text("All Groups") }
+                            selected = filter.outcome == null,
+                            onClick = { onUpdateFilter { it.copy(outcome = null, currentPage = 0) } },
+                            label = { Text("All (${state.serviceLogs.size})") },
+                            modifier = Modifier.testTag("history_filter_all")
                         )
-                        state.groups.forEach { group ->
+                        FilterChip(
+                            selected = filter.outcome == TaskOutcome.DONE,
+                            onClick = {
+                                onUpdateFilter {
+                                    it.copy(
+                                        outcome = if (it.outcome == TaskOutcome.DONE) null else TaskOutcome.DONE,
+                                        currentPage = 0
+                                    )
+                                }
+                            },
+                            label = { Text("Done ($doneCount)") },
+                            modifier = Modifier.testTag("history_filter_done")
+                        )
+                        FilterChip(
+                            selected = filter.outcome == TaskOutcome.REJECTED,
+                            onClick = {
+                                onUpdateFilter {
+                                    it.copy(
+                                        outcome = if (it.outcome == TaskOutcome.REJECTED) null else TaskOutcome.REJECTED,
+                                        currentPage = 0
+                                    )
+                                }
+                            },
+                            label = { Text("Rejected ($rejectedCount)") },
+                            modifier = Modifier.testTag("history_filter_rejected")
+                        )
+                    }
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                    ) {
+                        FilterChip(
+                            selected = filter.priority == null,
+                            onClick = { onUpdateFilter { it.copy(priority = null, currentPage = 0) } },
+                            label = { Text("All Priorities") }
+                        )
+                        ReminderPriority.entries.forEach { prio ->
                             FilterChip(
-                                selected = filter.groupId == group.id,
+                                selected = filter.priority == prio,
                                 onClick = {
                                     onUpdateFilter {
-                                        it.copy(groupId = if (it.groupId == group.id) null else group.id)
+                                        it.copy(
+                                            priority = if (it.priority == prio) null else prio,
+                                            currentPage = 0
+                                        )
                                     }
                                 },
-                                label = { Text(group.name) },
-                                modifier = Modifier.testTag("history_group_chip_${group.id}")
+                                label = { Text(prio.label) },
+                                modifier = Modifier.testTag("history_priority_chip_${prio.name.lowercase()}")
                             )
+                        }
+                        Box {
+                            FilterChip(
+                                selected = !filter.picFilter.isNullOrBlank(),
+                                onClick = { showPicMenu = true },
+                                leadingIcon = {
+                                    Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(16.dp))
+                                },
+                                label = { Text(filter.picFilter ?: "All PICs") },
+                                modifier = Modifier.testTag("history_pic_filter_chip")
+                            )
+                            DropdownMenu(
+                                expanded = showPicMenu,
+                                onDismissRequest = { showPicMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("All Engineers") },
+                                    onClick = {
+                                        onUpdateFilter { it.copy(picFilter = null, currentPage = 0) }
+                                        showPicMenu = false
+                                    }
+                                )
+                                state.knownEngineers.forEach { pic ->
+                                    DropdownMenuItem(
+                                        text = { Text(pic) },
+                                        onClick = {
+                                            onUpdateFilter { it.copy(picFilter = pic, currentPage = 0) }
+                                            showPicMenu = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                    ) {
+                        FilterChip(
+                            selected = filter.cadence == null,
+                            onClick = { onUpdateFilter { it.copy(cadence = null, currentPage = 0) } },
+                            label = { Text("All Cadences") }
+                        )
+                        Cadence.entries.forEach { cad ->
+                            FilterChip(
+                                selected = filter.cadence == cad,
+                                onClick = {
+                                    onUpdateFilter {
+                                        it.copy(
+                                            cadence = if (it.cadence == cad) null else cad,
+                                            currentPage = 0
+                                        )
+                                    }
+                                },
+                                label = { Text(cad.label) },
+                                modifier = Modifier.testTag("history_cadence_chip_${cad.name.lowercase()}")
+                            )
+                        }
+                    }
+
+                    if (state.groups.isNotEmpty()) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                        ) {
+                            FilterChip(
+                                selected = filter.groupId == null,
+                                onClick = { onUpdateFilter { it.copy(groupId = null, currentPage = 0) } },
+                                label = { Text("All Groups") }
+                            )
+                            state.groups.forEach { group ->
+                                FilterChip(
+                                    selected = filter.groupId == group.id,
+                                    onClick = {
+                                        onUpdateFilter {
+                                            it.copy(
+                                                groupId = if (it.groupId == group.id) null else group.id,
+                                                currentPage = 0
+                                            )
+                                        }
+                                    },
+                                    label = { Text(group.name) },
+                                    modifier = Modifier.testTag("history_group_chip_${group.id}")
+                                )
+                            }
                         }
                     }
                 }
@@ -1200,14 +1411,85 @@ fun TaskHistorySubTab(
                 )
             }
         } else {
-            items(filteredLogs, key = { "hist_${it.log.id}" }) { item ->
-                val machine = machinesById[item.log.machineId]
-                val group = machine?.groupId?.let { groupsById[it] }
-                TaskHistoryCard(
-                    item = item,
-                    machine = machine,
-                    group = group,
-                    onDelete = { onDeleteLog(item.log.id) }
+            groupedLogs.forEach { (sectionTitle, sectionLogs) ->
+                val isCollapsed = collapsedGroups[sectionTitle] == true
+                val sectionRejected = sectionLogs.count { it.log.outcome == TaskOutcome.REJECTED }
+
+                if (filter.groupBy != HistoryGroupBy.NONE) {
+                    item(key = "history_group_header_$sectionTitle") {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { collapsedGroups[sectionTitle] = !isCollapsed }
+                                .testTag("history_group_header_$sectionTitle")
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                            ) {
+                                Text(
+                                    text = sectionTitle,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (sectionRejected > 0) {
+                                    StatusPill(
+                                        text = "$sectionRejected REJECTED",
+                                        containerColor = sem.criticalContainer,
+                                        contentColor = sem.critical
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                }
+                                StatusPill(
+                                    text = "${sectionLogs.size}",
+                                    containerColor = MaterialTheme.colorScheme.surface,
+                                    contentColor = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = if (isCollapsed) Icons.Filled.ExpandMore else Icons.Filled.ExpandLess,
+                                    contentDescription = if (isCollapsed) "Expand group" else "Collapse group"
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (!isCollapsed) {
+                    items(sectionLogs, key = { "hist_${it.log.id}" }) { item ->
+                        val machine = machinesById[item.log.machineId]
+                        val group = machine?.groupId?.let { groupsById[it] }
+                        TaskHistoryCard(
+                            item = item,
+                            machine = machine,
+                            group = group,
+                            onDelete = { onDeleteLog(item.log.id) }
+                        )
+                    }
+                }
+            }
+
+            item(key = "history_pagination_footer") {
+                ListPaginationFooter(
+                    startNumber = pagedLogs.startNumber,
+                    endNumber = pagedLogs.endNumber,
+                    totalItems = pagedLogs.totalItems,
+                    safePageIndex = pagedLogs.safePageIndex,
+                    totalPages = pagedLogs.totalPages,
+                    pageSize = pageSize,
+                    onPageSizeChange = onSetPageSize,
+                    onPrevPage = {
+                        onUpdateFilter { it.copy(currentPage = (pagedLogs.safePageIndex - 1).coerceAtLeast(0)) }
+                    },
+                    onNextPage = {
+                        onUpdateFilter {
+                            it.copy(currentPage = (pagedLogs.safePageIndex + 1).coerceAtMost(pagedLogs.totalPages - 1))
+                        }
+                    },
+                    testTagPrefix = "history"
                 )
             }
         }

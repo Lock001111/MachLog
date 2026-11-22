@@ -117,12 +117,60 @@
       font-family: var(--sans); font-size: 13px; font-weight: 600;
       padding: 8px 13px; border-radius: 8px; cursor: pointer;
       border: 1px solid var(--border); background: var(--surface); color: var(--text);
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      transition: background 0.14s ease, border-color 0.14s ease, transform 0.08s ease;
     }
-    button:hover { background: var(--surface-alt); }
+    button:hover:not(:disabled) { background: var(--surface-alt); }
+    button:active:not(:disabled) { transform: translateY(1px); }
+    button:disabled { opacity: 0.52; cursor: not-allowed; }
     .btn-primary { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
-    .btn-primary:hover { filter: brightness(1.08); background: var(--primary); }
+    .btn-primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--primary); }
     .btn-danger { color: var(--danger); border-color: var(--danger); }
+    .btn-ok { color: var(--ok); border-color: var(--ok); background: var(--ok-soft); }
     .btn-sm { padding: 5px 9px; font-size: 12px; }
+    .icon-btn {
+      width: 32px; height: 32px; padding: 0; border-radius: 8px;
+      display: inline-flex; align-items: center; justify-content: center;
+      border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    }
+    .icon-btn svg { width: 15px; height: 15px; flex-shrink: 0; }
+    .icon-btn.primary { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
+    .icon-btn.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--primary); }
+    .icon-btn.danger { color: var(--danger); border-color: rgba(185,28,28,0.38); }
+    .icon-btn.danger:hover:not(:disabled) { background: var(--danger-soft); }
+    .icon-btn.ok { color: var(--ok); border-color: rgba(19,122,71,0.38); }
+    .icon-btn.ok:hover:not(:disabled) { background: var(--ok-soft); }
+    .pill-btn {
+      display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px;
+      border-radius: 999px; font-size: 12px; font-weight: 700; cursor: pointer;
+      border: 1px solid var(--border); background: var(--surface-alt); color: var(--text);
+      white-space: nowrap;
+    }
+    .pill-btn.info { background: var(--primary-soft); color: var(--primary); border-color: rgba(27,73,101,0.28); }
+    .pill-btn.ok { background: var(--ok-soft); color: var(--ok); border-color: rgba(19,122,71,0.28); }
+    .net-busy-track {
+      position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 100;
+      background: transparent; pointer-events: none; overflow: hidden;
+    }
+    .net-busy-bar {
+      height: 100%; width: 35%; background: var(--primary);
+      display: none; animation: machina-progress 1.1s infinite ease-in-out;
+    }
+    .net-busy-track.active .net-busy-bar { display: block; }
+    @keyframes machina-progress {
+      0% { transform: translateX(-120%); }
+      100% { transform: translateX(360%); }
+    }
+    .net-busy-pill {
+      display: none; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+      background: var(--primary-soft); color: var(--primary); font-size: 12px; font-weight: 600;
+    }
+    .net-busy-pill.active { display: inline-flex; }
+    .spinner {
+      width: 13px; height: 13px; border: 2px solid currentColor; border-right-color: transparent;
+      border-radius: 50%; animation: machina-spin 0.7s linear infinite;
+    }
+    @keyframes machina-spin { to { transform: rotate(360deg); } }
     input, select, textarea {
       font-family: var(--sans); font-size: 13px; color: var(--text);
       background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
@@ -199,6 +247,7 @@
   </style>
 </head>
 <body>
+<div class="net-busy-track" id="net-busy-track"><div class="net-busy-bar"></div></div>
 <div class="app-shell">
   <aside class="sidebar">
     <div class="brand">
@@ -213,23 +262,32 @@
       <button class="nav-btn" data-tab="machines" onclick="switchTab('machines')">Machines <span class="pill" id="nav-badge-machines">0</span></button>
       <button class="nav-btn" data-tab="warehouse" onclick="switchTab('warehouse')">Warehouse Parts <span class="pill" id="nav-badge-parts">0</span></button>
       <button class="nav-btn" data-tab="engineers" onclick="switchTab('engineers')">Engineers <span class="pill" id="nav-badge-engineers">0</span></button>
-      <button class="nav-btn" data-tab="reports" onclick="switchTab('reports')">Reports &amp; Sync</button>
+      <button class="nav-btn" data-tab="reports" onclick="switchTab('reports')">Reports</button>
+      <button class="nav-btn" data-tab="settings" onclick="switchTab('settings')">Settings</button>
     </div>
-    <div class="muted" style="margin-top:auto; padding: 6px;">
-      Connected live to Android device Room DB over local Wi-Fi.
+    <div id="sidebar-version" class="muted" style="margin-top:auto; padding: 6px;">
+      MachinaLog
     </div>
   </aside>
 
   <main class="main">
     <header class="topbar">
-      <div>
+      <div class="row">
         <strong id="page-title">Tasks, To-Dos &amp; History</strong>
-        <span class="pill pill-ok" style="margin-left:8px;">ONLINE</span>
+        <span id="conn-pill" class="pill pill-ok">ONLINE</span>
+        <span id="net-busy-pill" class="net-busy-pill"><span class="spinner"></span><span id="net-busy-text">Working...</span></span>
       </div>
       <div class="row">
-        <button class="btn-primary" onclick="openTaskModal()">+ New Task</button>
-        <button onclick="refreshState()">Refresh</button>
-        <button onclick="toggleTheme()">Theme</button>
+        <button class="btn-primary" title="Create New Maintenance Task" onclick="openTaskModal()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          New Task
+        </button>
+        <button class="icon-btn" title="Refresh Live Data" aria-label="Refresh Live Data" onclick="refreshState()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+        </button>
+        <button class="icon-btn" title="Toggle Dark / Light Theme" aria-label="Toggle Theme" onclick="toggleTheme()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"/></svg>
+        </button>
       </div>
     </header>
 
@@ -243,7 +301,9 @@
   <div class="modal">
     <div class="modal-header">
       <strong id="modal-title">Modal</strong>
-      <button class="btn-sm" onclick="closeModal()">Close</button>
+      <button class="icon-btn" title="Close" aria-label="Close modal" onclick="closeModal()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
     </div>
     <div class="modal-body" id="modal-body"></div>
     <div class="modal-footer" id="modal-footer"></div>
@@ -259,6 +319,8 @@ const appState = {
   tab: 'tasks',
   taskSubTab: 'active',
   pin: localStorage.getItem('machina_pin') || '',
+  isOnline: true,
+  busyCount: 0,
   taskCadence: 'ALL',
   taskPriority: 'ALL',
   taskPic: 'ALL',
@@ -271,21 +333,25 @@ const appState = {
   todoPriority: 'ALL',
   todoPic: 'ALL',
   todoGroupId: 'ALL',
+  todoGroupBy: 'SOURCE',
+  collapsedTodoGroups: {},
   todoSearch: '',
   todoShowDone: false,
-  todoPageSize: 25,
-  todoPage: 0,
   historyOutcome: 'ALL',
   historyPriority: 'ALL',
   historyCadence: 'ALL',
   historyPic: 'ALL',
   historyGroupId: 'ALL',
+  historyGroupBy: 'CUSTOM_GROUP',
+  collapsedHistoryGroups: {},
   historySearch: '',
   machineStatus: 'ALL',
   machineSearch: '',
   selectedMachineId: null,
   partSearch: '',
   engineerSearch: '',
+  pageSize: 25,
+  pages: { tasks: 0, todos: 0, history: 0, machines: 0, warehouse: 0, engineers: 0, reports: 0 },
   colSorts: {
     tasks: { key: 'deadline', dir: 'ASC' },
     todos: { key: 'trigger', dir: 'ASC' },
@@ -303,6 +369,64 @@ function esc(str) {
   return String(str ?? '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function iconSvg(name) {
+  const icons = {
+    complete: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m9 12 2 2 4-4"/></svg>',
+    reject: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m15 9-6 6M9 9l6 6"/></svg>',
+    edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+    del: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M10 11v6M14 11v6"/></svg>',
+    history: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>',
+    tasks: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
+    plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+    upload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+    download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+    refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>'
+  };
+  return icons[name] || '';
+}
+
+function setConnStatus(online, customLabel = null) {
+  appState.isOnline = Boolean(online);
+  const el = document.getElementById('conn-pill');
+  if (!el) return;
+  if (online) {
+    el.className = 'pill pill-ok';
+    el.textContent = customLabel || 'ONLINE';
+  } else {
+    el.className = 'pill pill-danger';
+    el.textContent = customLabel || 'OFFLINE · Reconnecting...';
+  }
+}
+
+function setNetBusy(active, label = 'Working...') {
+  appState.busyCount = Math.max(0, appState.busyCount + (active ? 1 : -1));
+  const track = document.getElementById('net-busy-track');
+  const pill = document.getElementById('net-busy-pill');
+  const txt = document.getElementById('net-busy-text');
+  if (appState.busyCount > 0) {
+    if (track) track.classList.add('active');
+    if (pill) pill.classList.add('active');
+    if (txt && label) txt.textContent = label;
+  } else {
+    if (track) track.classList.remove('active');
+    if (pill) pill.classList.remove('active');
+  }
+}
+
+async function withBusy(label, asyncFn, btnEl = null) {
+  if (btnEl) btnEl.disabled = true;
+  setNetBusy(true, label);
+  try {
+    return await asyncFn();
+  } catch (e) {
+    if (e.message !== 'PIN required') showToast('Error: ' + e.message);
+    throw e;
+  } finally {
+    setNetBusy(false);
+    if (btnEl) btnEl.disabled = false;
+  }
 }
 
 function showToast(msg) {
@@ -327,7 +451,14 @@ if (localStorage.getItem('machina_theme') === 'dark' ||
 async function apiFetch(path, options = {}) {
   const headers = Object.assign({}, options.headers || {});
   if (appState.pin) headers['X-Machina-Pin'] = appState.pin;
-  const resp = await fetch(path, Object.assign({}, options, { headers }));
+  let resp;
+  try {
+    resp = await fetch(path, Object.assign({}, options, { headers }));
+  } catch (networkErr) {
+    setConnStatus(false, 'OFFLINE · Unreachable');
+    throw networkErr;
+  }
+  setConnStatus(true);
   if (resp.status === 401) {
     promptPinModal();
     throw new Error('PIN required');
@@ -361,24 +492,47 @@ function submitPin() {
   refreshState();
 }
 
-async function refreshState() {
+async function refreshState(silent = false) {
+  if (!silent) setNetBusy(true, 'Syncing...');
   try {
-    const ping = await (await fetch('/api/ping', { headers: appState.pin ? { 'X-Machina-Pin': appState.pin } : {} })).json();
-    if (ping.pinRequired && !ping.authorized) {
-      promptPinModal();
-      return;
-    }
     const data = await apiJson('/api/state');
     appState.data = data;
     if (!appState.selectedMachineId && data.machines.length) {
       appState.selectedMachineId = data.machines[0].id;
     }
+    setConnStatus(true);
     updateKpis();
     renderTab();
   } catch (e) {
-    if (e.message !== 'PIN required') showToast('Error: ' + e.message);
+    if (e.message !== 'PIN required' && !silent) showToast('Error: ' + e.message);
+  } finally {
+    if (!silent) setNetBusy(false);
   }
 }
+
+async function pingHeartbeat() {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3500);
+    const resp = await fetch('/api/ping', {
+      headers: appState.pin ? { 'X-Machina-Pin': appState.pin } : {},
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    if (resp.ok) {
+      const wasOffline = !appState.isOnline;
+      setConnStatus(true);
+      if (wasOffline) refreshState(true);
+    } else {
+      setConnStatus(false, 'OFFLINE · Reconnecting...');
+    }
+  } catch (_) {
+    setConnStatus(false, 'OFFLINE · Reconnecting...');
+  }
+}
+window.addEventListener('online', () => { pingHeartbeat(); });
+window.addEventListener('offline', () => { setConnStatus(false, 'OFFLINE · Network down'); });
+setInterval(pingHeartbeat, 15000);
 
 function buildTodoFeedList(d) {
   const mMap = byIdMap(d.machines);
@@ -425,6 +579,17 @@ function buildTodoFeedList(d) {
     };
   });
   return standalone.concat(linked);
+}
+
+function isTaskApproachingOrOverdue(t, now) {
+  if (t.deadlineMillis < now) return true;
+  const remaining = t.deadlineMillis - now;
+  if (remaining <= 24 * 3600 * 1000) return true;
+  if (t.reminderEnabled) {
+    const leadMs = Math.max(1, Number(t.reminderLeadHours) || 24) * 3600 * 1000;
+    if (remaining <= leadMs) return true;
+  }
+  return false;
 }
 
 function renderTopKpis() {
@@ -496,10 +661,20 @@ function renderTopKpis() {
       { lbl: 'Active Task Assignments', val: d.tasks.length, color: 'var(--warn)' },
       { lbl: 'Historical Jobs Done', val: done, color: 'var(--ok)' }
     ];
+  } else if (appState.tab === 'reports') {
+    const done = d.serviceLogs.filter(l => l.outcome === 'DONE').length;
+    const rejected = d.serviceLogs.filter(l => l.outcome === 'REJECTED').length;
+    const partsUsed = d.serviceLogs.reduce((acc, l) => acc + (l.parts || []).reduce((s, p) => s + (Number(p.quantity) || 0), 0), 0);
+    cards = [
+      { lbl: 'Total Reports', val: d.serviceLogs.length, color: 'var(--primary)' },
+      { lbl: 'Done', val: done, color: 'var(--ok)' },
+      { lbl: 'Rejected', val: rejected, color: rejected > 0 ? 'var(--danger)' : '' },
+      { lbl: 'Spare Parts Used', val: partsUsed, color: '' }
+    ];
   } else {
     cards = [
       { lbl: 'Active Tasks', val: d.tasks.length, color: '' },
-      { lbl: 'History Reports', val: d.serviceLogs.length, color: 'var(--ok)' },
+      { lbl: 'Machines', val: d.machines.length, color: '' },
       { lbl: 'Custom Groups', val: d.groups.length, color: 'var(--primary)' },
       { lbl: 'App Version', val: 'v' + (d.appVersionName || '1.0'), color: '' }
     ];
@@ -514,14 +689,17 @@ function updateKpis() {
   const d = appState.data;
   if (!d) return;
   const now = Date.now();
-  const overdueTasks = d.tasks.filter(t => t.deadlineMillis < now).length;
-  const overdueTodos = d.todos.filter(td => !td.isCompleted && td.dueAtMillis < now).length;
+  const urgentTaskCount = d.tasks.filter(t => isTaskApproachingOrOverdue(t, now)).length;
   const engineersCount = (d.engineers || []).length;
 
-  document.getElementById('nav-badge-tasks').textContent = (overdueTasks + overdueTodos) || d.tasks.length;
+  document.getElementById('nav-badge-tasks').textContent = urgentTaskCount;
   document.getElementById('nav-badge-machines').textContent = d.machines.length;
   document.getElementById('nav-badge-parts').textContent = d.warehouseParts.length;
   document.getElementById('nav-badge-engineers').textContent = engineersCount;
+  const verEl = document.getElementById('sidebar-version');
+  if (verEl) {
+    verEl.textContent = `MachinaLog v${d.appVersionName || '1.0'} (Build ${d.appVersionCode || 1})`;
+  }
   renderTopKpis();
 }
 
@@ -533,7 +711,8 @@ function switchTab(tab) {
     machines: 'Machines & Fleet History',
     warehouse: 'Warehouse Spare Parts Catalog',
     engineers: 'Maintenance Engineers',
-    reports: 'Reports, Excel/Backup Sync & Groups'
+    reports: 'Machine Maintenance Reports & Exports',
+    settings: 'Settings, Import/Backup, Groups & Updates'
   };
   document.getElementById('page-title').textContent = titles[tab] || 'MachinaLog';
   renderTab();
@@ -666,6 +845,51 @@ function cmpValues(a, b, dir) {
   return dir === 'DESC' ? -res : res;
 }
 
+function paginateWeb(items, section) {
+  const size = [25, 50, 100].includes(appState.pageSize) ? appState.pageSize : 25;
+  const total = items.length;
+  if (total === 0) {
+    appState.pages[section] = 0;
+    return { items: [], safePage: 0, totalPages: 1, total: 0, start: 0, end: 0, size };
+  }
+  const totalPages = Math.max(1, Math.ceil(total / size));
+  const rawPage = Number(appState.pages[section]) || 0;
+  const safePage = Math.max(0, Math.min(rawPage, totalPages - 1));
+  appState.pages[section] = safePage;
+  const startIdx = safePage * size;
+  const slice = items.slice(startIdx, startIdx + size);
+  return {
+    items: slice,
+    safePage,
+    totalPages,
+    total,
+    start: startIdx + 1,
+    end: Math.min(startIdx + size, total),
+    size
+  };
+}
+
+function paginationBarHtml(paged, section) {
+  if (!paged || paged.total === 0) return '';
+  return `
+    <div class="between" style="margin-top:12px; padding-top:10px; border-top:1px solid var(--border);">
+      <div class="row">
+        <span class="muted">Showing ${paged.start}–${paged.end} of ${paged.total}</span>
+        <label style="display:inline-flex;align-items:center;gap:6px;margin:0;">
+          <span>Per page:</span>
+          <select style="width:auto;padding:4px 8px;" onchange="appState.pageSize=Number(this.value); appState.pages['${section}']=0; renderTab()">
+            ${[25, 50, 100].map(sz => `<option value="${sz}" ${paged.size===sz?'selected':''}>${sz}</option>`).join('')}
+          </select>
+        </label>
+      </div>
+      <div class="row">
+        <button class="btn-sm" ${paged.safePage <= 0 ? 'disabled' : ''} onclick="appState.pages['${section}']=Math.max(0, ${paged.safePage} - 1); renderTab()">&lt; Prev</button>
+        <span class="muted">Page ${paged.safePage + 1} of ${paged.totalPages}</span>
+        <button class="btn-sm" ${paged.safePage >= paged.totalPages - 1 ? 'disabled' : ''} onclick="appState.pages['${section}']=Math.min(${paged.totalPages - 1}, ${paged.safePage} + 1); renderTab()">Next &gt;</button>
+      </div>
+    </div>`;
+}
+
 function renderTab() {
   const d = appState.data;
   if (!d) return;
@@ -676,6 +900,7 @@ function renderTab() {
   else if (appState.tab === 'warehouse') renderWarehouse(root, d);
   else if (appState.tab === 'engineers') renderEngineers(root, d);
   else if (appState.tab === 'reports') renderReports(root, d);
+  else if (appState.tab === 'settings') renderSettings(root, d);
 }
 
 // --- 1. UNIFIED TASKS, TO-DO REMINDERS & HISTORY ---
@@ -746,13 +971,15 @@ function renderTasks(root, d) {
     }
   });
 
-  // Group rows based on appState.taskGroupBy
+  const paged = paginateWeb(filtered, 'tasks');
+
+  // Group paginated rows based on appState.taskGroupBy
   const sections = [];
   if (appState.taskGroupBy === 'NONE') {
-    sections.push({ title: 'All Tasks', tasks: filtered });
+    sections.push({ title: 'All Tasks', tasks: paged.items });
   } else {
     const groupBucket = new Map();
-    filtered.forEach(t => {
+    paged.items.forEach(t => {
       const m = mMap[t.machineId];
       let gTitle = 'Ungrouped';
       if (appState.taskGroupBy === 'CADENCE') gTitle = `${t.cadence} Maintenance`;
@@ -795,11 +1022,11 @@ function renderTasks(root, d) {
       </td>
       <td>${t.estimatedMinutes}m</td>
       <td>
-        <div class="row">
-          <button class="btn-primary btn-sm" onclick="openCompleteTaskModal(${t.id})">Complete</button>
-          <button class="btn-sm btn-danger" onclick="openRejectTaskModal(${t.id})">Reject</button>
-          <button class="btn-sm" onclick="openTaskModal(${t.id})">Edit</button>
-          <button class="btn-sm btn-danger" onclick="deleteTask(${t.id})">Del</button>
+        <div class="row" style="gap:5px;flex-wrap:nowrap;">
+          <button class="icon-btn ok" title="Complete Task & Generate Report" aria-label="Complete Task" onclick="openCompleteTaskModal(${t.id})">${iconSvg('complete')}</button>
+          <button class="icon-btn danger" title="Reject Service Request" aria-label="Reject Task" onclick="openRejectTaskModal(${t.id})">${iconSvg('reject')}</button>
+          <button class="icon-btn" title="Edit Task" aria-label="Edit Task" onclick="openTaskModal(${t.id})">${iconSvg('edit')}</button>
+          <button class="icon-btn danger" title="Delete Task" aria-label="Delete Task" onclick="deleteTask(${t.id}, this)">${iconSvg('del')}</button>
         </div>
       </td>
     </tr>`;
@@ -809,7 +1036,7 @@ function renderTasks(root, d) {
   if (filtered.length === 0) {
     tbodyHtml = `<tr><td colspan="8" class="muted">No active tasks match the current filter.</td></tr>`;
   } else {
-    sections.forEach((sec, idx) => {
+    sections.forEach(sec => {
       if (appState.taskGroupBy !== 'NONE') {
         const collapsed = Boolean(appState.collapsedTaskGroups[sec.title]);
         const secOverdue = sec.tasks.filter(t => t.deadlineMillis < now).length;
@@ -839,7 +1066,7 @@ function renderTasks(root, d) {
       ${subtabsHtml}
       <div class="between" style="gap:8px;">
         <div class="row" style="flex:1; min-width:240px;">
-          <input style="max-width:240px;" placeholder="Search tasks, machine, PIC..." value="${esc(appState.taskSearch)}" oninput="appState.taskSearch=this.value; renderTab()" />
+          <input style="max-width:220px;" placeholder="Search tasks, machine, PIC..." value="${esc(appState.taskSearch)}" oninput="appState.taskSearch=this.value; appState.pages.tasks=0; renderTab()" />
           <select style="width:auto;" onchange="appState.taskGroupBy=this.value; renderTab()">
             <option value="CUSTOM_GROUP" ${appState.taskGroupBy==='CUSTOM_GROUP'?'selected':''}>Group: Custom Group</option>
             <option value="CADENCE" ${appState.taskGroupBy==='CADENCE'?'selected':''}>Group: Cadence</option>
@@ -847,32 +1074,32 @@ function renderTasks(root, d) {
             <option value="PIC" ${appState.taskGroupBy==='PIC'?'selected':''}>Group: Engineer</option>
             <option value="NONE" ${appState.taskGroupBy==='NONE'?'selected':''}>Flat List</option>
           </select>
-          <select style="width:auto;" onchange="appState.taskPriority=this.value; renderTab()">
+          <select style="width:auto;" onchange="appState.taskPriority=this.value; appState.pages.tasks=0; renderTab()">
             <option value="ALL" ${appState.taskPriority==='ALL'?'selected':''}>All Priorities</option>
             <option value="URGENT" ${appState.taskPriority==='URGENT'?'selected':''}>URGENT</option>
             <option value="HIGH" ${appState.taskPriority==='HIGH'?'selected':''}>HIGH</option>
             <option value="NORMAL" ${appState.taskPriority==='NORMAL'?'selected':''}>NORMAL</option>
           </select>
-          <select style="width:auto;" onchange="appState.taskPic=this.value; renderTab()">
+          <select style="width:auto;" onchange="appState.taskPic=this.value; appState.pages.tasks=0; renderTab()">
             <option value="ALL" ${appState.taskPic==='ALL'?'selected':''}>All Engineers</option>
             ${picNames.map(p => `<option value="${esc(p)}" ${appState.taskPic===p?'selected':''}>${esc(p)}</option>`).join('')}
           </select>
-          <select style="width:auto;" onchange="appState.taskGroupId=this.value; renderTab()">
+          <select style="width:auto;" onchange="appState.taskGroupId=this.value; appState.pages.tasks=0; renderTab()">
             <option value="ALL" ${appState.taskGroupId==='ALL'?'selected':''}>All Groups</option>
             ${d.groups.map(g => `<option value="${g.id}" ${String(appState.taskGroupId)===String(g.id)?'selected':''}>${esc(g.name)}</option>`).join('')}
           </select>
           <label style="display:inline-flex;align-items:center;gap:6px;margin:0;cursor:pointer;">
-            <input type="checkbox" style="width:auto;" ${appState.taskOverdueOnly ? 'checked' : ''} onchange="appState.taskOverdueOnly=this.checked; renderTab()" />
+            <input type="checkbox" style="width:auto;" ${appState.taskOverdueOnly ? 'checked' : ''} onchange="appState.taskOverdueOnly=this.checked; appState.pages.tasks=0; renderTab()" />
             Overdue Only
           </label>
         </div>
         <div class="row">
-          <button class="btn-sm" onclick="triggerQuickExcelImport()">Import Excel (.xlsx)</button>
-          <button class="btn-primary" onclick="openTaskModal()">+ New Task</button>
+          <button class="icon-btn" title="Import Excel (.xlsx)" aria-label="Import Excel" onclick="triggerQuickExcelImport()">${iconSvg('upload')}</button>
+          <button class="btn-primary btn-sm" title="Create New Maintenance Task" onclick="openTaskModal()">${iconSvg('plus')} New Task</button>
         </div>
       </div>
       <div class="chip-row">
-        ${['ALL','ONCE','DAILY','WEEKLY','MONTHLY','YEARLY'].map(c => `<button class="chip ${appState.taskCadence===c?'active':''}" onclick="appState.taskCadence='${c}'; renderTab()">${c}</button>`).join('')}
+        ${['ALL','ONCE','DAILY','WEEKLY','MONTHLY','YEARLY'].map(c => `<button class="chip ${appState.taskCadence===c?'active':''}" onclick="appState.taskCadence='${c}'; appState.pages.tasks=0; renderTab()">${c}</button>`).join('')}
       </div>
       <table>
         <thead>
@@ -889,12 +1116,25 @@ function renderTasks(root, d) {
         </thead>
         <tbody>${tbodyHtml}</tbody>
       </table>
+      ${paginationBarHtml(paged, 'tasks')}
     </div>`;
 }
 
 function toggleTaskGroupCollapse(encodedTitle) {
   const title = decodeURIComponent(encodedTitle);
   appState.collapsedTaskGroups[title] = !appState.collapsedTaskGroups[title];
+  renderTab();
+}
+
+function toggleTodoGroupCollapse(encodedTitle) {
+  const title = decodeURIComponent(encodedTitle);
+  appState.collapsedTodoGroups[title] = !appState.collapsedTodoGroups[title];
+  renderTab();
+}
+
+function toggleHistoryGroupCollapse(encodedTitle) {
+  const title = decodeURIComponent(encodedTitle);
+  appState.collapsedHistoryGroups[title] = !appState.collapsedHistoryGroups[title];
   renderTab();
 }
 
@@ -942,45 +1182,144 @@ function renderTodoSubTabHtml(d) {
     }
   });
 
-  const pageSize = [25, 50, 100].includes(appState.todoPageSize) ? appState.todoPageSize : 25;
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const safePage = Math.max(0, Math.min(appState.todoPage, totalPages - 1));
-  appState.todoPage = safePage;
-  const startIdx = safePage * pageSize;
-  const paged = filtered.slice(startIdx, startIdx + pageSize);
+  const paged = paginateWeb(filtered, 'todos');
+
+  const todoSections = [];
+  if (appState.todoGroupBy === 'NONE') {
+    todoSections.push({ title: 'All Reminders', items: paged.items });
+  } else if (appState.todoGroupBy === 'SOURCE') {
+    const taskRows = paged.items.filter(i => i.kind === 'TASK');
+    const plainRows = paged.items.filter(i => i.kind === 'TODO');
+    if (taskRows.length) todoSections.push({ title: 'From Maintenance Tasks', items: taskRows });
+    if (plainRows.length) todoSections.push({ title: 'Plain To-Do Reminders', items: plainRows });
+  } else {
+    const bucket = new Map();
+    paged.items.forEach(item => {
+      const gTitle = appState.todoGroupBy === 'PRIORITY'
+        ? `${item.priority || 'NORMAL'} Priority`
+        : (item.personInCharge || 'Unassigned');
+      if (!bucket.has(gTitle)) bucket.set(gTitle, []);
+      bucket.get(gTitle).push(item);
+    });
+    bucket.forEach((items, title) => todoSections.push({ title, items }));
+  }
+
+  const renderTodoRow = (item) => {
+    const m = item.machineId ? mMap[item.machineId] : null;
+    const g = item.groupId ? gMap[item.groupId] : null;
+    const isOverdue = !item.isCompleted && item.dueAtMillis < now;
+    if (item.kind === 'TASK') {
+      const t = item.raw;
+      return `<tr>
+        <td><span class="pill pill-primary">TASK</span></td>
+        <td>
+          <strong>${esc(item.title)}</strong>
+          <div class="muted">${m ? esc(m.assetCode) + ' · ' + esc(m.name) : ''}${g ? ' · ' + esc(g.name) : ''}${item.notes ? ' — ' + esc(item.notes) : ''}</div>
+        </td>
+        <td><span class="pill pill-primary">${esc(item.repeatLabel)}</span></td>
+        <td>${priorityPillHtml(item.priority)}</td>
+        <td><div class="muted">${fmtDate(item.createdAtMillis)}</div></td>
+        <td>
+          <span class="pill ${isOverdue ? 'pill-danger' : 'pill-warn'}">${isOverdue ? 'OVERDUE' : 'REMIND AT'}</span>
+          <div>${fmtDate(item.triggerAtMillis)}</div>
+          <div class="muted">Deadline: ${fmtDate(item.dueAtMillis)}</div>
+        </td>
+        <td><strong>${esc(item.personInCharge)}</strong>${item.assistantEngineers ? `<div class="muted">+ ${esc(item.assistantEngineers)}</div>` : ''}</td>
+        <td>
+          <div class="row" style="gap:5px;flex-wrap:nowrap;">
+            <button class="icon-btn ok" title="Complete Task" aria-label="Complete Task" onclick="openCompleteTaskModal(${t.id})">${iconSvg('complete')}</button>
+            <button class="icon-btn danger" title="Reject Task" aria-label="Reject Task" onclick="openRejectTaskModal(${t.id})">${iconSvg('reject')}</button>
+            <button class="icon-btn" title="Edit Task" aria-label="Edit Task" onclick="openTaskModal(${t.id})">${iconSvg('edit')}</button>
+          </div>
+        </td>
+      </tr>`;
+    }
+    const td = item.raw;
+    return `<tr>
+      <td><input type="checkbox" style="width:auto;" ${td.isCompleted?'checked':''} onchange="toggleTodo(${td.id}, this)" /></td>
+      <td>
+        <strong>${esc(td.title)}</strong>
+        <div class="muted">${esc(td.notes)}${m ? ' · ' + esc(m.assetCode) : ''}${g ? ' · ' + esc(g.name) : ''}</div>
+      </td>
+      <td><span class="pill pill-primary">${esc(td.repeatRule)}</span></td>
+      <td>${priorityPillHtml(td.priority)}</td>
+      <td><div class="muted">${fmtDate(item.createdAtMillis)}</div></td>
+      <td>
+        ${td.isCompleted && td.completedAtMillis
+          ? `<span class="pill pill-ok">Done ${fmtDate(td.completedAtMillis)}</span>`
+          : `${isOverdue ? `<span class="pill pill-danger">OVERDUE</span> ` : ''}${fmtDate(td.dueAtMillis)}`}
+      </td>
+      <td>${esc(td.personInCharge)}</td>
+      <td>
+        <div class="row" style="gap:5px;flex-wrap:nowrap;">
+          <button class="icon-btn" title="Edit Reminder" aria-label="Edit Reminder" onclick="openTodoModal(${td.id})">${iconSvg('edit')}</button>
+          <button class="icon-btn danger" title="Delete Reminder" aria-label="Delete Reminder" onclick="deleteTodo(${td.id}, this)">${iconSvg('del')}</button>
+        </div>
+      </td>
+    </tr>`;
+  };
+
+  let todoBodyHtml = '';
+  if (filtered.length === 0) {
+    todoBodyHtml = `<tr><td colspan="8" class="muted">No reminders or task reminders match the filter.</td></tr>`;
+  } else {
+    todoSections.forEach(sec => {
+      if (appState.todoGroupBy !== 'NONE') {
+        const collapsed = Boolean(appState.collapsedTodoGroups[sec.title]);
+        const secOverdue = sec.items.filter(x => !x.isCompleted && x.dueAtMillis < now).length;
+        const encodedKey = encodeURIComponent(sec.title);
+        todoBodyHtml += `<tr class="group-row" onclick="toggleTodoGroupCollapse('${encodedKey}')">
+          <td colspan="8">
+            <div class="between">
+              <span>${collapsed ? '▶' : '▼'} ${esc(sec.title)}</span>
+              <div class="row">
+                ${secOverdue > 0 ? `<span class="pill pill-danger">${secOverdue} OVERDUE</span>` : ''}
+                <span class="pill">${sec.items.length}</span>
+              </div>
+            </div>
+          </td>
+        </tr>`;
+        if (!collapsed) {
+          todoBodyHtml += sec.items.map(renderTodoRow).join('');
+        }
+      } else {
+        todoBodyHtml += sec.items.map(renderTodoRow).join('');
+      }
+    });
+  }
 
   return `
     <div class="between" style="gap:8px;">
       <div class="row" style="flex:1; min-width:240px;">
-        <input style="max-width:240px;" placeholder="Search reminders, tasks, machine, PIC..." value="${esc(appState.todoSearch)}" oninput="appState.todoSearch=this.value; appState.todoPage=0; renderTab()" />
-        <select style="width:auto;" onchange="appState.todoPriority=this.value; appState.todoPage=0; renderTab()">
+        <input style="max-width:220px;" placeholder="Search reminders, tasks, machine, PIC..." value="${esc(appState.todoSearch)}" oninput="appState.todoSearch=this.value; appState.pages.todos=0; renderTab()" />
+        <select style="width:auto;" onchange="appState.todoGroupBy=this.value; renderTab()">
+          <option value="SOURCE" ${appState.todoGroupBy==='SOURCE'?'selected':''}>Group: Task vs Plain</option>
+          <option value="PRIORITY" ${appState.todoGroupBy==='PRIORITY'?'selected':''}>Group: Priority</option>
+          <option value="PIC" ${appState.todoGroupBy==='PIC'?'selected':''}>Group: Engineer</option>
+          <option value="NONE" ${appState.todoGroupBy==='NONE'?'selected':''}>Flat List</option>
+        </select>
+        <select style="width:auto;" onchange="appState.todoPriority=this.value; appState.pages.todos=0; renderTab()">
           <option value="ALL" ${appState.todoPriority==='ALL'?'selected':''}>All Priorities</option>
           <option value="URGENT" ${appState.todoPriority==='URGENT'?'selected':''}>URGENT</option>
           <option value="HIGH" ${appState.todoPriority==='HIGH'?'selected':''}>HIGH</option>
           <option value="NORMAL" ${appState.todoPriority==='NORMAL'?'selected':''}>NORMAL</option>
         </select>
-        <select style="width:auto;" onchange="appState.todoPic=this.value; appState.todoPage=0; renderTab()">
+        <select style="width:auto;" onchange="appState.todoPic=this.value; appState.pages.todos=0; renderTab()">
           <option value="ALL" ${appState.todoPic==='ALL'?'selected':''}>All Engineers</option>
           ${picNames.map(p => `<option value="${esc(p)}" ${appState.todoPic===p?'selected':''}>${esc(p)}</option>`).join('')}
         </select>
-        <select style="width:auto;" onchange="appState.todoGroupId=this.value; appState.todoPage=0; renderTab()">
+        <select style="width:auto;" onchange="appState.todoGroupId=this.value; appState.pages.todos=0; renderTab()">
           <option value="ALL" ${appState.todoGroupId==='ALL'?'selected':''}>All Groups</option>
           ${d.groups.map(g => `<option value="${g.id}" ${String(appState.todoGroupId)===String(g.id)?'selected':''}>${esc(g.name)}</option>`).join('')}
         </select>
         <label style="display:inline-flex;align-items:center;gap:6px;margin:0;cursor:pointer;">
-          <input type="checkbox" style="width:auto;" ${appState.todoShowDone?'checked':''} onchange="appState.todoShowDone=this.checked; appState.todoPage=0; renderTab()" /> Show Completed (${completedCount})
-        </label>
-        <label style="display:inline-flex;align-items:center;gap:6px;margin:0;">
-          <span>Per page:</span>
-          <select style="width:auto;" onchange="appState.todoPageSize=Number(this.value); appState.todoPage=0; renderTab()">
-            ${[25, 50, 100].map(sz => `<option value="${sz}" ${pageSize===sz?'selected':''}>${sz}</option>`).join('')}
-          </select>
+          <input type="checkbox" style="width:auto;" ${appState.todoShowDone?'checked':''} onchange="appState.todoShowDone=this.checked; appState.pages.todos=0; renderTab()" /> Show Completed (${completedCount})
         </label>
       </div>
-      <button class="btn-primary" onclick="openTodoModal()">+ New Reminder</button>
+      <button class="btn-primary btn-sm" title="Create New Reminder" onclick="openTodoModal()">${iconSvg('plus')} New Reminder</button>
     </div>
     <div class="chip-row">
-      ${['ALL','ONCE','DAILY','WEEKLY','MONTHLY','YEARLY'].map(r => `<button class="chip ${appState.todoRepeat===r?'active':''}" onclick="appState.todoRepeat='${r}'; appState.todoPage=0; renderTab()">${r}</button>`).join('')}
+      ${['ALL','ONCE','DAILY','WEEKLY','MONTHLY','YEARLY'].map(r => `<button class="chip ${appState.todoRepeat===r?'active':''}" onclick="appState.todoRepeat='${r}'; appState.pages.todos=0; renderTab()">${r}</button>`).join('')}
     </div>
     <table>
       <thead>
@@ -995,68 +1334,9 @@ function renderTodoSubTabHtml(d) {
           <th>Actions</th>
         </tr>
       </thead>
-      <tbody>
-        ${paged.length === 0 ? `<tr><td colspan="8" class="muted">No reminders or task reminders match the filter.</td></tr>` :
-          paged.map(item => {
-            const m = item.machineId ? mMap[item.machineId] : null;
-            const g = item.groupId ? gMap[item.groupId] : null;
-            const isOverdue = !item.isCompleted && item.dueAtMillis < now;
-            if (item.kind === 'TASK') {
-              const t = item.raw;
-              return `<tr>
-                <td><span class="pill pill-primary">TASK</span></td>
-                <td>
-                  <strong>${esc(item.title)}</strong>
-                  <div class="muted">${m ? esc(m.assetCode) + ' · ' + esc(m.name) : ''}${g ? ' · ' + esc(g.name) : ''}${item.notes ? ' — ' + esc(item.notes) : ''}</div>
-                </td>
-                <td><span class="pill pill-primary">${esc(item.repeatLabel)}</span></td>
-                <td>${priorityPillHtml(item.priority)}</td>
-                <td><div class="muted">${fmtDate(item.createdAtMillis)}</div></td>
-                <td>
-                  <span class="pill ${isOverdue ? 'pill-danger' : 'pill-warn'}">${isOverdue ? 'OVERDUE' : 'REMIND AT'}</span>
-                  <div>${fmtDate(item.triggerAtMillis)}</div>
-                  <div class="muted">Deadline: ${fmtDate(item.dueAtMillis)}</div>
-                </td>
-                <td><strong>${esc(item.personInCharge)}</strong>${item.assistantEngineers ? `<div class="muted">+ ${esc(item.assistantEngineers)}</div>` : ''}</td>
-                <td>
-                  <div class="row">
-                    <button class="btn-primary btn-sm" onclick="openCompleteTaskModal(${t.id})">Complete</button>
-                    <button class="btn-sm btn-danger" onclick="openRejectTaskModal(${t.id})">Reject</button>
-                    <button class="btn-sm" onclick="openTaskModal(${t.id})">Edit</button>
-                  </div>
-                </td>
-              </tr>`;
-            }
-            const td = item.raw;
-            return `<tr>
-              <td><input type="checkbox" style="width:auto;" ${td.isCompleted?'checked':''} onchange="toggleTodo(${td.id})" /></td>
-              <td>
-                <strong>${esc(td.title)}</strong>
-                <div class="muted">${esc(td.notes)}${m ? ' · ' + esc(m.assetCode) : ''}${g ? ' · ' + esc(g.name) : ''}</div>
-              </td>
-              <td><span class="pill pill-primary">${esc(td.repeatRule)}</span></td>
-              <td>${priorityPillHtml(td.priority)}</td>
-              <td><div class="muted">${fmtDate(item.createdAtMillis)}</div></td>
-              <td>
-                ${td.isCompleted && td.completedAtMillis
-                  ? `<span class="pill pill-ok">Done ${fmtDate(td.completedAtMillis)}</span>`
-                  : `${isOverdue ? `<span class="pill pill-danger">OVERDUE</span> ` : ''}${fmtDate(td.dueAtMillis)}`}
-              </td>
-              <td>${esc(td.personInCharge)}</td>
-              <td><div class="row"><button class="btn-sm" onclick="openTodoModal(${td.id})">Edit</button><button class="btn-sm btn-danger" onclick="deleteTodo(${td.id})">Del</button></div></td>
-            </tr>`;
-          }).join('')}
-      </tbody>
+      <tbody>${todoBodyHtml}</tbody>
     </table>
-    ${filtered.length > 0 ? `
-      <div class="between" style="margin-top:10px;">
-        <span class="muted">Showing ${startIdx + 1}–${Math.min(startIdx + pageSize, filtered.length)} of ${filtered.length}</span>
-        <div class="row">
-          <button class="btn-sm" ${safePage <= 0 ? 'disabled' : ''} onclick="appState.todoPage=Math.max(0, appState.todoPage - 1); renderTab()">&lt; Prev</button>
-          <span class="muted">Page ${safePage + 1} of ${totalPages}</span>
-          <button class="btn-sm" ${safePage >= totalPages - 1 ? 'disabled' : ''} onclick="appState.todoPage=Math.min(${totalPages - 1}, appState.todoPage + 1); renderTab()">Next &gt;</button>
-        </div>
-      </div>` : ''}`;
+    ${paginationBarHtml(paged, 'todos')}`;
 }
 
 function renderHistorySubTabHtml(d) {
@@ -1101,25 +1381,113 @@ function renderHistorySubTabHtml(d) {
     }
   });
 
+  const paged = paginateWeb(filtered, 'history');
+
+  const histSections = [];
+  if (appState.historyGroupBy === 'NONE') {
+    histSections.push({ title: 'All History Records', logs: paged.items });
+  } else {
+    const bucket = new Map();
+    paged.items.forEach(l => {
+      const m = mMap[l.machineId];
+      let gTitle = 'Ungrouped';
+      if (appState.historyGroupBy === 'OUTCOME') gTitle = `${l.outcome} Jobs`;
+      else if (appState.historyGroupBy === 'CADENCE') gTitle = l.cadenceSnapshot ? `${l.cadenceSnapshot} Maintenance` : 'Direct / Ad-Hoc Log';
+      else if (appState.historyGroupBy === 'MACHINE') gTitle = m ? `${m.assetCode} · ${m.name}` : 'Unknown Machine';
+      else if (appState.historyGroupBy === 'PIC') gTitle = l.personInCharge || 'Unassigned';
+      else {
+        const effGid = l.groupId || m?.groupId;
+        gTitle = effGid && gMap[effGid] ? gMap[effGid].name : 'Ungrouped';
+      }
+      if (!bucket.has(gTitle)) bucket.set(gTitle, []);
+      bucket.get(gTitle).push(l);
+    });
+    bucket.forEach((logs, title) => histSections.push({ title, logs }));
+  }
+
+  const renderHistRow = (l) => {
+    const m = mMap[l.machineId];
+    const g = gMap[l.groupId || m?.groupId];
+    return `<tr>
+      <td>
+        ${outcomePillHtml(l.outcome)}
+        ${l.cadenceSnapshot ? `<div style="margin-top:4px;"><span class="pill pill-primary">${esc(l.cadenceSnapshot)}</span></div>` : ''}
+        ${g ? `<div class="muted" style="margin-top:3px;">${esc(g.name)}</div>` : ''}
+      </td>
+      <td>${l.prioritySnapshot ? priorityPillHtml(l.prioritySnapshot) : '<span class="muted">-</span>'}</td>
+      <td><strong>${esc(m?.assetCode || '-')}</strong><div class="muted">${esc(m?.name || '')}</div></td>
+      <td>
+        <strong>${esc(l.summaryTitle)}</strong>
+        ${l.outcome === 'REJECTED' && l.rejectionReason ? `<div style="color:var(--danger);font-size:12px;margin-top:3px;">Rejection reason: ${esc(l.rejectionReason)}</div>` : ''}
+        ${l.malfunctionDetails ? `<div class="muted" style="margin-top:3px;">${esc(l.malfunctionDetails)}</div>` : ''}
+        ${l.parts.length ? `<div style="margin-top:5px;">${l.parts.map(p => `<span class="pill pill-primary" style="margin-right:4px;">${esc(p.partCode)} ${esc(p.partName)} ×${p.quantity} ${esc(p.unit)}</span>`).join('')}</div>` : ''}
+      </td>
+      <td>
+        <strong>${esc(l.personInCharge)}</strong>
+        ${l.assistantEngineers ? `<div class="muted">+ ${esc(l.assistantEngineers)}</div>` : ''}
+      </td>
+      <td><div class="muted">${fmtDate(l.createdAtMillis)}</div></td>
+      <td><div>${fmtDate(l.completedAtMillis)}</div><div class="muted">${l.serviceDurationMinutes > 0 ? l.serviceDurationMinutes + 'm' : 'Rejected'}</div></td>
+      <td><button class="icon-btn danger" title="Delete History Entry" aria-label="Delete History Entry" onclick="deleteHistoryLog(${l.id}, this)">${iconSvg('del')}</button></td>
+    </tr>`;
+  };
+
+  let histBodyHtml = '';
+  if (filtered.length === 0) {
+    histBodyHtml = `<tr><td colspan="8" class="muted">No historical records match the filter.</td></tr>`;
+  } else {
+    histSections.forEach(sec => {
+      if (appState.historyGroupBy !== 'NONE') {
+        const collapsed = Boolean(appState.collapsedHistoryGroups[sec.title]);
+        const secRej = sec.logs.filter(l => l.outcome === 'REJECTED').length;
+        const encodedKey = encodeURIComponent(sec.title);
+        histBodyHtml += `<tr class="group-row" onclick="toggleHistoryGroupCollapse('${encodedKey}')">
+          <td colspan="8">
+            <div class="between">
+              <span>${collapsed ? '▶' : '▼'} ${esc(sec.title)}</span>
+              <div class="row">
+                ${secRej > 0 ? `<span class="pill pill-danger">${secRej} REJECTED</span>` : ''}
+                <span class="pill">${sec.logs.length}</span>
+              </div>
+            </div>
+          </td>
+        </tr>`;
+        if (!collapsed) {
+          histBodyHtml += sec.logs.map(renderHistRow).join('');
+        }
+      } else {
+        histBodyHtml += sec.logs.map(renderHistRow).join('');
+      }
+    });
+  }
+
   return `
     <div class="between" style="gap:8px;">
       <div class="row" style="flex:1; min-width:240px;">
-        <input style="max-width:260px;" placeholder="Search completed/rejected task, engineer, part..." value="${esc(appState.historySearch)}" oninput="appState.historySearch=this.value; renderTab()" />
-        <select style="width:auto;" onchange="appState.historyPriority=this.value; renderTab()">
+        <input style="max-width:220px;" placeholder="Search completed/rejected task, engineer, part..." value="${esc(appState.historySearch)}" oninput="appState.historySearch=this.value; appState.pages.history=0; renderTab()" />
+        <select style="width:auto;" onchange="appState.historyGroupBy=this.value; renderTab()">
+          <option value="CUSTOM_GROUP" ${appState.historyGroupBy==='CUSTOM_GROUP'?'selected':''}>Group: Custom Group</option>
+          <option value="OUTCOME" ${appState.historyGroupBy==='OUTCOME'?'selected':''}>Group: Outcome</option>
+          <option value="CADENCE" ${appState.historyGroupBy==='CADENCE'?'selected':''}>Group: Cadence</option>
+          <option value="MACHINE" ${appState.historyGroupBy==='MACHINE'?'selected':''}>Group: Machine</option>
+          <option value="PIC" ${appState.historyGroupBy==='PIC'?'selected':''}>Group: Engineer</option>
+          <option value="NONE" ${appState.historyGroupBy==='NONE'?'selected':''}>Flat List</option>
+        </select>
+        <select style="width:auto;" onchange="appState.historyPriority=this.value; appState.pages.history=0; renderTab()">
           <option value="ALL" ${appState.historyPriority==='ALL'?'selected':''}>All Priorities</option>
           <option value="URGENT" ${appState.historyPriority==='URGENT'?'selected':''}>URGENT</option>
           <option value="HIGH" ${appState.historyPriority==='HIGH'?'selected':''}>HIGH</option>
           <option value="NORMAL" ${appState.historyPriority==='NORMAL'?'selected':''}>NORMAL</option>
         </select>
-        <select style="width:auto;" onchange="appState.historyCadence=this.value; renderTab()">
+        <select style="width:auto;" onchange="appState.historyCadence=this.value; appState.pages.history=0; renderTab()">
           <option value="ALL" ${appState.historyCadence==='ALL'?'selected':''}>All Cadences</option>
           ${['ONCE','DAILY','WEEKLY','MONTHLY','YEARLY'].map(c => `<option value="${c}" ${appState.historyCadence===c?'selected':''}>${c}</option>`).join('')}
         </select>
-        <select style="width:auto;" onchange="appState.historyPic=this.value; renderTab()">
+        <select style="width:auto;" onchange="appState.historyPic=this.value; appState.pages.history=0; renderTab()">
           <option value="ALL" ${appState.historyPic==='ALL'?'selected':''}>All Engineers</option>
           ${picNames.map(p => `<option value="${esc(p)}" ${appState.historyPic===p?'selected':''}>${esc(p)}</option>`).join('')}
         </select>
-        <select style="width:auto;" onchange="appState.historyGroupId=this.value; renderTab()">
+        <select style="width:auto;" onchange="appState.historyGroupId=this.value; appState.pages.history=0; renderTab()">
           <option value="ALL" ${appState.historyGroupId==='ALL'?'selected':''}>All Groups</option>
           ${d.groups.map(g => `<option value="${g.id}" ${String(appState.historyGroupId)===String(g.id)?'selected':''}>${esc(g.name)}</option>`).join('')}
         </select>
@@ -1127,7 +1495,7 @@ function renderHistorySubTabHtml(d) {
       <span class="muted">Auto-generated on Done or Rejected</span>
     </div>
     <div class="chip-row">
-      ${['ALL','DONE','REJECTED'].map(o => `<button class="chip ${appState.historyOutcome===o?'active':''}" onclick="appState.historyOutcome='${o}'; renderTab()">${o === 'ALL' ? 'All Outcomes' : o}</button>`).join('')}
+      ${['ALL','DONE','REJECTED'].map(o => `<button class="chip ${appState.historyOutcome===o?'active':''}" onclick="appState.historyOutcome='${o}'; appState.pages.history=0; renderTab()">${o === 'ALL' ? 'All Outcomes' : o}</button>`).join('')}
     </div>
     <table>
       <thead>
@@ -1142,42 +1510,18 @@ function renderHistorySubTabHtml(d) {
           <th>Actions</th>
         </tr>
       </thead>
-      <tbody>
-        ${filtered.length === 0 ? `<tr><td colspan="8" class="muted">No historical records match the filter.</td></tr>` :
-          filtered.map(l => {
-            const m = mMap[l.machineId];
-            const g = gMap[l.groupId || m?.groupId];
-            return `<tr>
-              <td>
-                ${outcomePillHtml(l.outcome)}
-                ${l.cadenceSnapshot ? `<div style="margin-top:4px;"><span class="pill pill-primary">${esc(l.cadenceSnapshot)}</span></div>` : ''}
-                ${g ? `<div class="muted" style="margin-top:3px;">${esc(g.name)}</div>` : ''}
-              </td>
-              <td>${l.prioritySnapshot ? priorityPillHtml(l.prioritySnapshot) : '<span class="muted">-</span>'}</td>
-              <td><strong>${esc(m?.assetCode || '-')}</strong><div class="muted">${esc(m?.name || '')}</div></td>
-              <td>
-                <strong>${esc(l.summaryTitle)}</strong>
-                ${l.outcome === 'REJECTED' && l.rejectionReason ? `<div style="color:var(--danger);font-size:12px;margin-top:3px;">Rejection reason: ${esc(l.rejectionReason)}</div>` : ''}
-                ${l.malfunctionDetails ? `<div class="muted" style="margin-top:3px;">${esc(l.malfunctionDetails)}</div>` : ''}
-                ${l.parts.length ? `<div style="margin-top:5px;">${l.parts.map(p => `<span class="pill pill-primary" style="margin-right:4px;">${esc(p.partCode)} ${esc(p.partName)} ×${p.quantity} ${esc(p.unit)}</span>`).join('')}</div>` : ''}
-              </td>
-              <td>
-                <strong>${esc(l.personInCharge)}</strong>
-                ${l.assistantEngineers ? `<div class="muted">+ ${esc(l.assistantEngineers)}</div>` : ''}
-              </td>
-              <td><div class="muted">${fmtDate(l.createdAtMillis)}</div></td>
-              <td><div>${fmtDate(l.completedAtMillis)}</div><div class="muted">${l.serviceDurationMinutes > 0 ? l.serviceDurationMinutes + 'm' : 'Rejected'}</div></td>
-              <td><button class="btn-sm btn-danger" onclick="deleteHistoryLog(${l.id})">Del</button></td>
-            </tr>`;
-          }).join('')}
-      </tbody>
-    </table>`;
+      <tbody>${histBodyHtml}</tbody>
+    </table>
+    ${paginationBarHtml(paged, 'history')}`;
 }
 
-async function deleteHistoryLog(id) {
+async function deleteHistoryLog(id, btnEl) {
   if (!confirm('Delete this history log entry?')) return;
-  await apiJson(`/api/logs/${id}`, 'DELETE');
-  showToast('History entry deleted'); refreshState();
+  await withBusy('Deleting...', async () => {
+    await apiJson(`/api/logs/${id}`, 'DELETE');
+    showToast('History entry deleted');
+    await refreshState(true);
+  }, btnEl);
 }
 
 function syncTaskMachineStatus() {
@@ -1253,10 +1597,10 @@ function openTaskModal(id = null, defaultMachineIdArg = null) {
       <label>Assistant Engineers (Optional — multi-person service)</label>
       <div id="t-assistants-box" class="checkbox-grid">${renderAssistantCheckboxesHtml('t', engineers, activePic, selectedAst)}</div>
     </div>
-  `, `<button class="btn-primary" onclick="saveTask(${t ? t.id : 0})">Save Task</button>`);
+  `, `<button class="btn-primary" onclick="saveTask(${t ? t.id : 0}, this)">Save Task</button>`);
 }
 
-async function saveTask(id) {
+async function saveTask(id, btnEl) {
   const title = document.getElementById('t-title').value.trim();
   const pic = document.getElementById('t-pic').value.trim();
   if (!title) return showToast('Task title is required');
@@ -1267,29 +1611,36 @@ async function saveTask(id) {
   const remUnit = document.getElementById('t-rem-unit').value;
   const reminderLeadHours = remUnit === 'DAYS' ? remVal * 24 : remVal;
 
-  await apiJson('/api/tasks', 'POST', {
-    id,
-    machineId: Number(document.getElementById('t-machine').value),
-    machineStatus: document.getElementById('t-machine-status').value,
-    groupId: document.getElementById('t-group').value ? Number(document.getElementById('t-group').value) : null,
-    title,
-    description: document.getElementById('t-desc').value,
-    cadence: document.getElementById('t-cadence').value,
-    priority: document.getElementById('t-priority').value,
-    deadlineMillis: dlStr ? new Date(dlStr).getTime() : Date.now(),
-    estimatedMinutes: Number(document.getElementById('t-est').value) || 30,
-    personInCharge: pic,
-    assistantEngineers: getCheckedAssistants('t').join(', '),
-    reminderEnabled: remEnabled,
-    reminderLeadHours
-  });
-  closeModal(); showToast('Task saved'); refreshState();
+  await withBusy('Saving task...', async () => {
+    await apiJson('/api/tasks', 'POST', {
+      id,
+      machineId: Number(document.getElementById('t-machine').value),
+      machineStatus: document.getElementById('t-machine-status').value,
+      groupId: document.getElementById('t-group').value ? Number(document.getElementById('t-group').value) : null,
+      title,
+      description: document.getElementById('t-desc').value,
+      cadence: document.getElementById('t-cadence').value,
+      priority: document.getElementById('t-priority').value,
+      deadlineMillis: dlStr ? new Date(dlStr).getTime() : Date.now(),
+      estimatedMinutes: Number(document.getElementById('t-est').value) || 30,
+      personInCharge: pic,
+      assistantEngineers: getCheckedAssistants('t').join(', '),
+      reminderEnabled: remEnabled,
+      reminderLeadHours
+    });
+    closeModal();
+    showToast('Task saved');
+    await refreshState(true);
+  }, btnEl);
 }
 
-async function deleteTask(id) {
+async function deleteTask(id, btnEl) {
   if (!confirm('Delete this maintenance task?')) return;
-  await apiJson(`/api/tasks/${id}`, 'DELETE');
-  showToast('Task deleted'); refreshState();
+  await withBusy('Deleting task...', async () => {
+    await apiJson(`/api/tasks/${id}`, 'DELETE');
+    showToast('Task deleted');
+    await refreshState(true);
+  }, btnEl);
 }
 
 // --- SEARCHABLE WAREHOUSE PICKER IN TASK COMPLETION ---
@@ -1401,23 +1752,27 @@ function openCompleteTaskModal(taskId) {
     </div>
     <div><label>Findings / Work Performed</label><textarea id="ct-notes" rows="2"></textarea></div>
     <div id="draft-parts-wrap">${renderDraftPartsBlock()}</div>
-  `, `<button class="btn-primary" onclick="submitCompleteTask(${taskId})">Complete &amp; Save Report</button>`);
+  `, `<button class="btn-primary" onclick="submitCompleteTask(${taskId}, this)">Complete &amp; Save Report</button>`);
   renderPickerResults();
 }
 
-async function submitCompleteTask(taskId) {
+async function submitCompleteTask(taskId, btnEl) {
   const pic = document.getElementById('ct-pic').value.trim();
   if (!pic) return showToast('Select a registered engineer for PIC first');
-  await apiJson(`/api/tasks/${taskId}/complete`, 'POST', {
-    personInCharge: pic,
-    assistantEngineers: getCheckedAssistants('ct'),
-    actualDurationMinutes: Number(document.getElementById('ct-min').value) || 30,
-    notes: document.getElementById('ct-notes').value,
-    flagMalfunction: false,
-    severity: 'LOW',
-    spareParts: appState.draftParts
-  });
-  closeModal(); showToast('Task completed & report generated'); refreshState();
+  await withBusy('Completing task...', async () => {
+    await apiJson(`/api/tasks/${taskId}/complete`, 'POST', {
+      personInCharge: pic,
+      assistantEngineers: getCheckedAssistants('ct'),
+      actualDurationMinutes: Number(document.getElementById('ct-min').value) || 30,
+      notes: document.getElementById('ct-notes').value,
+      flagMalfunction: false,
+      severity: 'LOW',
+      spareParts: appState.draftParts
+    });
+    closeModal();
+    showToast('Task completed & report generated');
+    await refreshState(true);
+  }, btnEl);
 }
 
 function openRejectTaskModal(taskId) {
@@ -1448,22 +1803,26 @@ function openRejectTaskModal(taskId) {
       <label style="display:inline-flex;align-items:center;gap:6px;margin:0;cursor:pointer;">
         <input id="rt-reschedule" type="checkbox" style="width:auto;" /> Skip this cycle &amp; schedule next ${esc(t.cadence)} occurrence
       </label>` : ''}
-  `, `<button class="btn-danger" onclick="submitRejectTask(${taskId})">Reject &amp; Record Report</button>`);
+  `, `<button class="btn-danger" onclick="submitRejectTask(${taskId}, this)">Reject &amp; Record Report</button>`);
 }
 
-async function submitRejectTask(taskId) {
+async function submitRejectTask(taskId, btnEl) {
   const pic = document.getElementById('rt-pic').value.trim();
   const reason = document.getElementById('rt-reason').value.trim();
   if (!pic) return showToast('Select a registered engineer for PIC first');
   if (!reason) return showToast('Please enter a rejection reason');
   const reschedEl = document.getElementById('rt-reschedule');
-  await apiJson(`/api/tasks/${taskId}/reject`, 'POST', {
-    personInCharge: pic,
-    assistantEngineers: getCheckedAssistants('rt'),
-    rejectionReason: reason,
-    rescheduleNextCycle: Boolean(reschedEl && reschedEl.checked)
-  });
-  closeModal(); showToast('Task rejected & recorded in history'); refreshState();
+  await withBusy('Rejecting task...', async () => {
+    await apiJson(`/api/tasks/${taskId}/reject`, 'POST', {
+      personInCharge: pic,
+      assistantEngineers: getCheckedAssistants('rt'),
+      rejectionReason: reason,
+      rescheduleNextCycle: Boolean(reschedEl && reschedEl.checked)
+    });
+    closeModal();
+    showToast('Task rejected & recorded in history');
+    await refreshState(true);
+  }, btnEl);
 }
 
 function openTodoModal(id = null) {
@@ -1484,29 +1843,47 @@ function openTodoModal(id = null) {
       <div><label>PIC (Registered Only) *</label>${buildEngineerSelectHtml('td-pic', engineers, activePic)}</div>
     </div>
     <div><label>Linked Machine (Optional)</label><select id="td-machine"><option value="">None</option>${d.machines.map(m => `<option value="${m.id}" ${td?.machineId===m.id?'selected':''}>${esc(m.assetCode)} · ${esc(m.name)}</option>`).join('')}</select></div>
-  `, `<button class="btn-primary" onclick="saveTodo(${td ? td.id : 0})">Save Reminder</button>`);
+  `, `<button class="btn-primary" onclick="saveTodo(${td ? td.id : 0}, this)">Save Reminder</button>`);
 }
 
-async function saveTodo(id) {
+async function saveTodo(id, btnEl) {
   const title = document.getElementById('td-title').value.trim();
   const pic = document.getElementById('td-pic').value.trim();
   if (!title) return showToast('Title is required');
   if (!pic) return showToast('Select a registered engineer for PIC first');
   const dueStr = document.getElementById('td-due').value;
-  await apiJson('/api/todos', 'POST', {
-    id,
-    title,
-    notes: document.getElementById('td-notes').value,
-    repeatRule: document.getElementById('td-rule').value,
-    priority: document.getElementById('td-prio').value,
-    dueAtMillis: dueStr ? new Date(dueStr).getTime() : Date.now(),
-    personInCharge: pic,
-    machineId: document.getElementById('td-machine').value ? Number(document.getElementById('td-machine').value) : null
-  });
-  closeModal(); showToast('Reminder saved'); refreshState();
+  await withBusy('Saving reminder...', async () => {
+    await apiJson('/api/todos', 'POST', {
+      id,
+      title,
+      notes: document.getElementById('td-notes').value,
+      repeatRule: document.getElementById('td-rule').value,
+      priority: document.getElementById('td-prio').value,
+      dueAtMillis: dueStr ? new Date(dueStr).getTime() : Date.now(),
+      personInCharge: pic,
+      machineId: document.getElementById('td-machine').value ? Number(document.getElementById('td-machine').value) : null
+    });
+    closeModal();
+    showToast('Reminder saved');
+    await refreshState(true);
+  }, btnEl);
 }
-async function toggleTodo(id) { await apiJson(`/api/todos/${id}/toggle`, 'POST'); showToast('Reminder updated'); refreshState(); }
-async function deleteTodo(id) { if (confirm('Delete reminder?')) { await apiJson(`/api/todos/${id}`, 'DELETE'); refreshState(); } }
+
+async function toggleTodo(id, cbEl) {
+  await withBusy('Updating reminder...', async () => {
+    await apiJson(`/api/todos/${id}/toggle`, 'POST');
+    showToast('Reminder updated');
+    await refreshState(true);
+  }, cbEl);
+}
+
+async function deleteTodo(id, btnEl) {
+  if (!confirm('Delete reminder?')) return;
+  await withBusy('Deleting...', async () => {
+    await apiJson(`/api/todos/${id}`, 'DELETE');
+    await refreshState(true);
+  }, btnEl);
+}
 
 // --- 2. MACHINES & AUTOMATED REPORTS ---
 function renderMachines(root, d) {
@@ -1517,7 +1894,8 @@ function renderMachines(root, d) {
     if (q && !`${m.assetCode} ${m.name} ${m.locationZone} ${m.modelInfo}`.toLowerCase().includes(q)) return false;
     return true;
   });
-  const sel = d.machines.find(m => m.id === appState.selectedMachineId) || filtered[0];
+  const paged = paginateWeb(filtered, 'machines');
+  const sel = d.machines.find(m => m.id === appState.selectedMachineId) || paged.items[0] || filtered[0];
   const selTasks = sel ? d.tasks.filter(t => t.machineId === sel.id) : [];
   const selLogs = sel ? d.serviceLogs.filter(l => l.machineId === sel.id) : [];
 
@@ -1527,16 +1905,16 @@ function renderMachines(root, d) {
         <div class="between" style="margin-bottom:8px;">
           <strong>Fleet (${filtered.length})</strong>
           <div class="row">
-            <button class="btn-sm" onclick="triggerQuickExcelImport()">Import Excel</button>
-            <button class="btn-primary btn-sm" onclick="openMachineModal()">+ Add Machine</button>
+            <button class="icon-btn" title="Import Excel (.xlsx)" aria-label="Import Excel" onclick="triggerQuickExcelImport()">${iconSvg('upload')}</button>
+            <button class="btn-primary btn-sm" title="Add Machine" onclick="openMachineModal()">${iconSvg('plus')} Machine</button>
           </div>
         </div>
-        <input placeholder="Search asset code or name..." value="${esc(appState.machineSearch)}" oninput="appState.machineSearch=this.value; renderTab()" />
+        <input placeholder="Search asset code or name..." value="${esc(appState.machineSearch)}" oninput="appState.machineSearch=this.value; appState.pages.machines=0; renderTab()" />
         <div class="chip-row">
-          ${['ALL','OPERATIONAL','MAINTENANCE_DUE','MALFUNCTION'].map(s => `<button class="chip ${appState.machineStatus===s?'active':''}" onclick="appState.machineStatus='${s}'; renderTab()">${s.replace('_',' ')}</button>`).join('')}
+          ${['ALL','OPERATIONAL','MAINTENANCE_DUE','MALFUNCTION'].map(s => `<button class="chip ${appState.machineStatus===s?'active':''}" onclick="appState.machineStatus='${s}'; appState.pages.machines=0; renderTab()">${s.replace('_',' ')}</button>`).join('')}
         </div>
         <div style="display:flex;flex-direction:column;gap:8px;">
-          ${filtered.map(m => `
+          ${paged.items.map(m => `
             <div onclick="appState.selectedMachineId=${m.id}; renderTab()" style="cursor:pointer;padding:10px;border-radius:10px;border:1px solid ${sel?.id===m.id?'var(--primary)':'var(--border)'};background:${sel?.id===m.id?'var(--primary-soft)':'var(--surface)'};">
               <div class="between"><strong>${esc(m.assetCode)}</strong>${statusPillHtml(m.status)}</div>
               <div style="font-weight:600;margin-top:3px;">${esc(m.name)}</div>
@@ -1544,6 +1922,7 @@ function renderMachines(root, d) {
             </div>
           `).join('') || `<div class="muted">No machines match.</div>`}
         </div>
+        ${paginationBarHtml(paged, 'machines')}
       </div>
 
       <div class="card">
@@ -1556,9 +1935,9 @@ function renderMachines(root, d) {
               ${sel.notes ? `<p style="font-size:13px;margin:8px 0 0;">${esc(sel.notes)}</p>` : ''}
             </div>
             <div class="row">
-              <button class="btn-primary btn-sm" onclick="openTaskModal(null, ${sel.id})">+ New Task</button>
-              <button class="btn-sm" onclick="openMachineModal(${sel.id})">Edit</button>
-              <button class="btn-sm btn-danger" onclick="deleteMachine(${sel.id})">Delete</button>
+              <button class="btn-primary btn-sm" title="New Task for Machine" onclick="openTaskModal(null, ${sel.id})">${iconSvg('plus')} Task</button>
+              <button class="icon-btn" title="Edit Machine" aria-label="Edit Machine" onclick="openMachineModal(${sel.id})">${iconSvg('edit')}</button>
+              <button class="icon-btn danger" title="Delete Machine" aria-label="Delete Machine" onclick="deleteMachine(${sel.id}, this)">${iconSvg('del')}</button>
             </div>
           </div>
           <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;" />
@@ -1572,9 +1951,9 @@ function renderMachines(root, d) {
                     <strong>${esc(t.title)}</strong>
                     <div class="muted">${fmtDate(t.deadlineMillis)} · PIC: ${esc(t.personInCharge)}${t.assistantEngineers ? ' (+ ' + esc(t.assistantEngineers) + ')' : ''}</div>
                   </div>
-                  <div class="row">
-                    <button class="btn-primary btn-sm" onclick="openCompleteTaskModal(${t.id})">Complete</button>
-                    <button class="btn-sm btn-danger" onclick="openRejectTaskModal(${t.id})">Reject</button>
+                  <div class="row" style="gap:5px;">
+                    <button class="icon-btn ok" title="Complete Task" aria-label="Complete Task" onclick="openCompleteTaskModal(${t.id})">${iconSvg('complete')}</button>
+                    <button class="icon-btn danger" title="Reject Task" aria-label="Reject Task" onclick="openRejectTaskModal(${t.id})">${iconSvg('reject')}</button>
                   </div>
                 </div>
               </div>
@@ -1618,25 +1997,36 @@ function openMachineModal(id = null) {
     </div>
     <div><label>Status</label><select id="m-status">${['OPERATIONAL','MAINTENANCE_DUE','MALFUNCTION'].map(s => `<option ${m?.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
     <div><label>Notes</label><textarea id="m-notes" rows="2">${esc(m?.notes || '')}</textarea></div>
-  `, `<button class="btn-primary" onclick="saveMachine(${m ? m.id : 0})">Save Machine</button>`);
+  `, `<button class="btn-primary" onclick="saveMachine(${m ? m.id : 0}, this)">Save Machine</button>`);
 }
 
-async function saveMachine(id) {
+async function saveMachine(id, btnEl) {
   const assetCode = document.getElementById('m-code').value.trim();
   const name = document.getElementById('m-name').value.trim();
   if (!assetCode || !name) return showToast('Asset Code and Name are required');
-  await apiJson('/api/machines', 'POST', {
-    id,
-    groupId: document.getElementById('m-group').value ? Number(document.getElementById('m-group').value) : null,
-    assetCode, name,
-    locationZone: document.getElementById('m-zone').value,
-    modelInfo: document.getElementById('m-model').value,
-    status: document.getElementById('m-status').value,
-    notes: document.getElementById('m-notes').value
-  });
-  closeModal(); showToast('Machine saved'); refreshState();
+  await withBusy('Saving machine...', async () => {
+    await apiJson('/api/machines', 'POST', {
+      id,
+      groupId: document.getElementById('m-group').value ? Number(document.getElementById('m-group').value) : null,
+      assetCode, name,
+      locationZone: document.getElementById('m-zone').value,
+      modelInfo: document.getElementById('m-model').value,
+      status: document.getElementById('m-status').value,
+      notes: document.getElementById('m-notes').value
+    });
+    closeModal();
+    showToast('Machine saved');
+    await refreshState(true);
+  }, btnEl);
 }
-async function deleteMachine(id) { if (confirm('Delete machine and all its tasks/history?')) { await apiJson(`/api/machines/${id}`, 'DELETE'); refreshState(); } }
+
+async function deleteMachine(id, btnEl) {
+  if (!confirm('Delete machine and all its tasks/history?')) return;
+  await withBusy('Deleting machine...', async () => {
+    await apiJson(`/api/machines/${id}`, 'DELETE');
+    await refreshState(true);
+  }, btnEl);
+}
 
 // --- 3. WAREHOUSE SPARE PARTS ---
 function renderWarehouse(root, d) {
@@ -1655,6 +2045,7 @@ function renderWarehouse(root, d) {
       default: return cmpValues(a.partCode || '', b.partCode || '', wSort.dir);
     }
   });
+  const paged = paginateWeb(filtered, 'warehouse');
   root.innerHTML = `
     <div class="card">
       <div class="between" style="margin-bottom:10px;">
@@ -1663,11 +2054,11 @@ function renderWarehouse(root, d) {
           <div class="muted">Codes &amp; descriptions master list (with machine usage history)</div>
         </div>
         <div class="row">
-          <button onclick="triggerQuickExcelImport()">Import Excel (.xlsx)</button>
-          <button class="btn-primary" onclick="openWarehouseModal()">+ Add Part</button>
+          <button class="icon-btn" title="Import Excel (.xlsx)" aria-label="Import Excel" onclick="triggerQuickExcelImport()">${iconSvg('upload')}</button>
+          <button class="btn-primary btn-sm" title="Add Warehouse Spare Part" onclick="openWarehouseModal()">${iconSvg('plus')} Add Part</button>
         </div>
       </div>
-      <input style="margin-bottom:10px;" placeholder="Search by Part Code / ID or Description..." value="${esc(appState.partSearch)}" oninput="appState.partSearch=this.value; renderTab()" />
+      <input style="margin-bottom:10px;" placeholder="Search by Part Code / ID or Description..." value="${esc(appState.partSearch)}" oninput="appState.partSearch=this.value; appState.pages.warehouse=0; renderTab()" />
       <table>
         <thead>
           <tr>
@@ -1680,21 +2071,22 @@ function renderWarehouse(root, d) {
         </thead>
         <tbody>
           ${filtered.length === 0 ? `<tr><td colspan="5" class="muted">No matching spare parts.</td></tr>` :
-            filtered.map(w => `<tr>
+            paged.items.map(w => `<tr>
               <td><span class="pill pill-primary">${esc(w.partCode)}</span></td>
               <td><strong>${esc(w.partName || '-')}</strong></td>
               <td>${esc(w.partDescription)}</td>
               <td><span class="pill">${esc(w.defaultUnit)}</span></td>
               <td>
-                <div class="row">
-                  <button class="btn-sm" onclick="openPartHistoryModal(${w.id})">History</button>
-                  <button class="btn-sm" onclick="openWarehouseModal(${w.id})">Edit</button>
-                  <button class="btn-sm btn-danger" onclick="deleteWarehousePart(${w.id})">Del</button>
+                <div class="row" style="gap:5px;flex-wrap:nowrap;">
+                  <button class="icon-btn" title="Machine Usage History" aria-label="Part Usage History" onclick="openPartHistoryModal(${w.id})">${iconSvg('history')}</button>
+                  <button class="icon-btn" title="Edit Part" aria-label="Edit Part" onclick="openWarehouseModal(${w.id})">${iconSvg('edit')}</button>
+                  <button class="icon-btn danger" title="Delete Part" aria-label="Delete Part" onclick="deleteWarehousePart(${w.id}, this)">${iconSvg('del')}</button>
                 </div>
               </td>
             </tr>`).join('')}
         </tbody>
       </table>
+      ${paginationBarHtml(paged, 'warehouse')}
     </div>`;
 }
 
@@ -1748,21 +2140,32 @@ function openWarehouseModal(id = null) {
     </div>
     <div><label>Part Name (optional)</label><input id="wp-name" value="${esc(w?.partName || '')}" /></div>
     <div><label>Spare Part Description *</label><textarea id="wp-desc" rows="3">${esc(w?.partDescription || '')}</textarea></div>
-  `, `<button class="btn-primary" onclick="saveWarehousePart(${w ? w.id : 0})">Save Part</button>`);
+  `, `<button class="btn-primary" onclick="saveWarehousePart(${w ? w.id : 0}, this)">Save Part</button>`);
 }
 
-async function saveWarehousePart(id) {
+async function saveWarehousePart(id, btnEl) {
   const partCode = document.getElementById('wp-code').value.trim();
   const partDescription = document.getElementById('wp-desc').value.trim();
   const partName = document.getElementById('wp-name').value.trim();
   if (!partCode || (!partDescription && !partName)) return showToast('Part Code and Description are required');
-  await apiJson('/api/warehouse', 'POST', {
-    id, partCode, partName, partDescription: partDescription || partName,
-    defaultUnit: document.getElementById('wp-unit').value.trim() || 'pcs'
-  });
-  closeModal(); showToast('Warehouse part saved'); refreshState();
+  await withBusy('Saving part...', async () => {
+    await apiJson('/api/warehouse', 'POST', {
+      id, partCode, partName, partDescription: partDescription || partName,
+      defaultUnit: document.getElementById('wp-unit').value.trim() || 'pcs'
+    });
+    closeModal();
+    showToast('Warehouse part saved');
+    await refreshState(true);
+  }, btnEl);
 }
-async function deleteWarehousePart(id) { if (confirm('Remove this spare part from catalog?')) { await apiJson(`/api/warehouse/${id}`, 'DELETE'); refreshState(); } }
+
+async function deleteWarehousePart(id, btnEl) {
+  if (!confirm('Remove this spare part from catalog?')) return;
+  await withBusy('Deleting...', async () => {
+    await apiJson(`/api/warehouse/${id}`, 'DELETE');
+    await refreshState(true);
+  }, btnEl);
+}
 
 // --- 4. ENGINEERS ROSTER ---
 function renderEngineers(root, d) {
@@ -1790,6 +2193,8 @@ function renderEngineers(root, d) {
     }
   });
 
+  const paged = paginateWeb(enriched, 'engineers');
+
   root.innerHTML = `
     <div class="card">
       <div class="between" style="margin-bottom:10px;">
@@ -1797,9 +2202,9 @@ function renderEngineers(root, d) {
           <strong>Registered Maintenance Engineers (${enriched.length})</strong>
           <div class="muted">Only engineers listed here can be assigned as PIC or Assistants</div>
         </div>
-        <button class="btn-primary" onclick="openEngineerModal()">+ Add Engineer</button>
+        <button class="btn-primary btn-sm" title="Add Maintenance Engineer" onclick="openEngineerModal()">${iconSvg('plus')} Add Engineer</button>
       </div>
-      <input style="margin-bottom:10px;" placeholder="Search by name, employee ID, role, shift..." value="${esc(appState.engineerSearch)}" oninput="appState.engineerSearch=this.value; renderTab()" />
+      <input style="margin-bottom:10px;" placeholder="Search by name, employee ID, role, shift..." value="${esc(appState.engineerSearch)}" oninput="appState.engineerSearch=this.value; appState.pages.engineers=0; renderTab()" />
       <table>
         <thead>
           <tr>
@@ -1808,23 +2213,37 @@ function renderEngineers(root, d) {
             ${sortableTh('engineers', 'role', 'Role')}
             ${sortableTh('engineers', 'shift', 'Shift')}
             ${sortableTh('engineers', 'activeCount', 'Active Tasks')}
-            ${sortableTh('engineers', 'histCount', 'History')}
+            ${sortableTh('engineers', 'histCount', 'History Log')}
             <th>Actions</th>
           </tr>
         </thead>
         <tbody>
           ${enriched.length === 0 ? `<tr><td colspan="7" class="muted">No engineers match the search.</td></tr>` :
-            enriched.map(({ e, activeCount, histCount }) => `<tr>
+            paged.items.map(({ e, activeCount, histCount }) => `<tr>
               <td><strong>${esc(e.name)}</strong></td>
               <td>${e.employeeCode ? `<span class="pill pill-primary">${esc(e.employeeCode)}</span>` : '-'}</td>
               <td>${esc(e.role)}</td>
               <td><span class="pill">${esc(e.shift)}</span></td>
-              <td><button class="btn-sm" onclick="openEngineerTasksModal(${e.id})">${activeCount} Active &rarr;</button></td>
-              <td><button class="btn-sm" onclick="openEngineerHistoryModal(${e.id})">${histCount} Logged &rarr;</button></td>
-              <td><div class="row"><button class="btn-sm" onclick="openEngineerModal(${e.id})">Edit</button><button class="btn-sm btn-danger" onclick="deleteEngineer(${e.id})">Del</button></div></td>
+              <td>
+                <button class="pill-btn info" title="Inspect Active Tasks" onclick="openEngineerTasksModal(${e.id})">
+                  ${iconSvg('tasks')} <span>${activeCount} Active</span>
+                </button>
+              </td>
+              <td>
+                <button class="pill-btn ok" title="Inspect History Log" onclick="openEngineerHistoryModal(${e.id})">
+                  ${iconSvg('history')} <span>${histCount} History</span>
+                </button>
+              </td>
+              <td>
+                <div class="row" style="gap:5px;flex-wrap:nowrap;">
+                  <button class="icon-btn" title="Edit Engineer" aria-label="Edit Engineer" onclick="openEngineerModal(${e.id})">${iconSvg('edit')}</button>
+                  <button class="icon-btn danger" title="Remove Engineer" aria-label="Remove Engineer" onclick="deleteEngineer(${e.id}, this)">${iconSvg('del')}</button>
+                </div>
+              </td>
             </tr>`).join('')}
         </tbody>
       </table>
+      ${paginationBarHtml(paged, 'engineers')}
     </div>`;
 }
 
@@ -1857,9 +2276,9 @@ function openEngineerTasksModal(engineerId) {
             <div style="font-weight:700;margin-top:5px;">${esc(t.title)}</div>
             <div class="muted">${esc(m?.assetCode || '-')} · ${esc(m?.name || '')} · Created: ${fmtDate(t.createdAtMillis)}</div>
             <div class="row" style="margin-top:8px;justify-content:flex-end;">
-              <button class="btn-sm" onclick="closeModal(); openTaskModal(${t.id})">Edit</button>
-              <button class="btn-sm btn-danger" onclick="closeModal(); openRejectTaskModal(${t.id})">Reject</button>
-              <button class="btn-primary btn-sm" onclick="closeModal(); openCompleteTaskModal(${t.id})">Complete</button>
+              <button class="icon-btn" title="Edit Task" aria-label="Edit Task" onclick="closeModal(); openTaskModal(${t.id})">${iconSvg('edit')}</button>
+              <button class="icon-btn danger" title="Reject Task" aria-label="Reject Task" onclick="closeModal(); openRejectTaskModal(${t.id})">${iconSvg('reject')}</button>
+              <button class="icon-btn ok" title="Complete Task" aria-label="Complete Task" onclick="closeModal(); openCompleteTaskModal(${t.id})">${iconSvg('complete')}</button>
             </div>
           </div>`;
       }).join('');
@@ -1922,6 +2341,7 @@ function filterTasksByEngineer(engineerId) {
   if (!eng) return;
   closeModal();
   appState.taskPic = eng.name;
+  appState.pages.tasks = 0;
   appState.taskSubTab = 'active';
   switchTab('tasks');
 }
@@ -1931,6 +2351,7 @@ function filterHistoryByEngineer(engineerId) {
   if (!eng) return;
   closeModal();
   appState.historyPic = eng.name;
+  appState.pages.history = 0;
   appState.taskSubTab = 'history';
   switchTab('tasks');
 }
@@ -1944,81 +2365,165 @@ function openEngineerModal(id = null) {
       <div><label>Shift</label><select id="eng-shift">${['Day Shift','Night Shift','Swing Shift','On-Call'].map(s => `<option ${e?.shift===s?'selected':''}>${s}</option>`).join('')}</select></div>
     </div>
     <div><label>Role / Specialty</label><input id="eng-role" value="${esc(e?.role || 'Maintenance Engineer')}" /></div>
-  `, `<button class="btn-primary" onclick="saveEngineer(${e ? e.id : 0})">Save Engineer</button>`);
+  `, `<button class="btn-primary" onclick="saveEngineer(${e ? e.id : 0}, this)">Save Engineer</button>`);
 }
 
-async function saveEngineer(id) {
+async function saveEngineer(id, btnEl) {
   const name = document.getElementById('eng-name').value.trim();
   if (!name) return showToast('Engineer name is required');
-  await apiJson('/api/engineers', 'POST', {
-    id,
-    name,
-    employeeCode: document.getElementById('eng-code').value.trim().toUpperCase(),
-    role: document.getElementById('eng-role').value.trim() || 'Maintenance Engineer',
-    shift: document.getElementById('eng-shift').value
-  });
-  closeModal(); showToast('Engineer saved'); refreshState();
+  await withBusy('Saving engineer...', async () => {
+    await apiJson('/api/engineers', 'POST', {
+      id,
+      name,
+      employeeCode: document.getElementById('eng-code').value.trim().toUpperCase(),
+      role: document.getElementById('eng-role').value.trim() || 'Maintenance Engineer',
+      shift: document.getElementById('eng-shift').value
+    });
+    closeModal();
+    showToast('Engineer saved');
+    await refreshState(true);
+  }, btnEl);
 }
 
-async function deleteEngineer(id) {
+async function deleteEngineer(id, btnEl) {
   if (!confirm('Remove this engineer from the active roster?')) return;
-  await apiJson(`/api/engineers/${id}`, 'DELETE');
-  showToast('Engineer removed'); refreshState();
+  await withBusy('Removing engineer...', async () => {
+    await apiJson(`/api/engineers/${id}`, 'DELETE');
+    showToast('Engineer removed');
+    await refreshState(true);
+  }, btnEl);
 }
 
-// --- 5. REPORTS, EXCEL/BACKUP SYNC & GROUPS ---
+// --- 5. REPORTS ---
+function filterReportsList(d) {
+  const rf = appState.reportFilter;
+  const mMap = byIdMap(d.machines);
+  const startMs = rf.start ? new Date(rf.start + 'T00:00:00').getTime() : null;
+  const endMs = rf.end ? new Date(rf.end + 'T23:59:59').getTime() : null;
+  return (d.serviceLogs || []).filter(l => {
+    const m = mMap[l.machineId];
+    const effGroupId = l.groupId || m?.groupId || null;
+    if (rf.machineId && String(l.machineId) !== String(rf.machineId)) return false;
+    if (rf.groupId && String(effGroupId || '') !== String(rf.groupId)) return false;
+    if (rf.pic) {
+      const picLower = rf.pic.toLowerCase();
+      const isPic = (l.personInCharge || '').toLowerCase() === picLower;
+      const isAst = parseEngineerList(l.assistantEngineers).some(a => a.toLowerCase() === picLower);
+      if (!isPic && !isAst) return false;
+    }
+    if (rf.cadence && (l.cadenceSnapshot || '') !== rf.cadence) return false;
+    if (rf.outcome && l.outcome !== rf.outcome) return false;
+    if (startMs && (l.completedAtMillis || 0) < startMs) return false;
+    if (endMs && (l.completedAtMillis || 0) > endMs) return false;
+    return true;
+  }).sort((a, b) => (b.completedAtMillis || 0) - (a.completedAtMillis || 0));
+}
+
 function renderReports(root, d) {
   const rf = appState.reportFilter;
+  const mMap = byIdMap(d.machines);
   const pics = [...new Set([
     ...(d.engineers || []).map(e => e.name),
     ...d.tasks.map(t => t.personInCharge),
     ...d.serviceLogs.map(l => l.personInCharge)
   ].filter(Boolean))].sort();
   const qs = buildReportQuery();
+  const matched = filterReportsList(d);
+  const paged = paginateWeb(matched, 'reports');
 
+  root.innerHTML = `
+    <div class="card">
+      <div class="between" style="margin-bottom:10px;">
+        <div>
+          <strong>Export Filtered Reports (Excel &amp; PDF)</strong>
+          <div class="muted">Reports are automatically generated when maintenance tasks are marked Done or Rejected</div>
+        </div>
+        <div class="row">
+          <button class="btn-primary" onclick="downloadWithPin('/api/reports/export.xlsx?${qs}', 'MachinaLog_Report.xlsx')">${iconSvg('download')} Excel (.xlsx)</button>
+          <button onclick="downloadWithPin('/api/reports/export.pdf?${qs}', 'MachinaLog_Report.pdf')">${iconSvg('download')} PDF (.pdf)</button>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div><label>Machine</label><select id="rf-m" onchange="appState.reportFilter.machineId=this.value; appState.pages.reports=0; renderTab()"><option value="">All Machines</option>${d.machines.map(m=>`<option value="${m.id}" ${rf.machineId==m.id?'selected':''}>${esc(m.assetCode)} · ${esc(m.name)}</option>`).join('')}</select></div>
+        <div><label>Custom Group</label><select id="rf-g" onchange="appState.reportFilter.groupId=this.value; appState.pages.reports=0; renderTab()"><option value="">All Groups</option>${d.groups.map(g=>`<option value="${g.id}" ${rf.groupId==g.id?'selected':''}>${esc(g.name)}</option>`).join('')}</select></div>
+        <div><label>Person In Charge</label><select id="rf-p" onchange="appState.reportFilter.pic=this.value; appState.pages.reports=0; renderTab()"><option value="">All Engineers</option>${pics.map(p=>`<option ${rf.pic===p?'selected':''}>${esc(p)}</option>`).join('')}</select></div>
+        <div><label>Cadence</label><select id="rf-c" onchange="appState.reportFilter.cadence=this.value; appState.pages.reports=0; renderTab()"><option value="">All Cadences</option>${['ONCE','DAILY','WEEKLY','MONTHLY','YEARLY'].map(c=>`<option ${rf.cadence===c?'selected':''}>${c}</option>`).join('')}</select></div>
+        <div><label>Task Outcome</label><select id="rf-o" onchange="appState.reportFilter.outcome=this.value; appState.pages.reports=0; renderTab()"><option value="">All Outcomes</option><option value="DONE" ${rf.outcome==='DONE'?'selected':''}>Done Only</option><option value="REJECTED" ${rf.outcome==='REJECTED'?'selected':''}>Rejected Only</option></select></div>
+        <div></div>
+        <div><label>From Date</label><input type="date" value="${esc(rf.start)}" onchange="appState.reportFilter.start=this.value; appState.pages.reports=0; renderTab()" /></div>
+        <div><label>To Date</label><input type="date" value="${esc(rf.end)}" onchange="appState.reportFilter.end=this.value; appState.pages.reports=0; renderTab()" /></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="between" style="margin-bottom:8px;">
+        <strong>Matched Report Entries (${matched.length})</strong>
+        <button class="btn-sm" onclick="appState.reportFilter={machineId:'',groupId:'',pic:'',cadence:'',outcome:'',start:'',end:''}; appState.pages.reports=0; renderTab()">Reset Filters</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Outcome</th>
+            <th>Machine</th>
+            <th>Task &amp; Findings / Reason</th>
+            <th>Engineers</th>
+            <th>Recorded</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${matched.length === 0 ? `<tr><td colspan="6" class="muted">No report entries match the selected filters.</td></tr>` :
+            paged.items.map(l => {
+              const m = mMap[l.machineId];
+              return `<tr>
+                <td>${outcomePillHtml(l.outcome)}${l.cadenceSnapshot ? `<div style="margin-top:4px;"><span class="pill pill-primary">${esc(l.cadenceSnapshot)}</span></div>` : ''}</td>
+                <td><strong>${esc(m?.assetCode || '-')}</strong><div class="muted">${esc(m?.name || '')}</div></td>
+                <td>
+                  <strong>${esc(l.summaryTitle)}</strong>
+                  ${l.outcome==='REJECTED' && l.rejectionReason ? `<div style="color:var(--danger);font-size:12px;">Reason: ${esc(l.rejectionReason)}</div>` : ''}
+                  ${l.malfunctionDetails ? `<div class="muted">${esc(l.malfunctionDetails)}</div>` : ''}
+                  ${(l.parts||[]).length ? `<div style="margin-top:4px;">${l.parts.map(p => `<span class="pill pill-primary" style="margin-right:4px;">${esc(p.partCode)} ${esc(p.partName)} ×${p.quantity}</span>`).join('')}</div>` : ''}
+                </td>
+                <td><strong>${esc(l.personInCharge)}</strong>${l.assistantEngineers ? `<div class="muted">+ ${esc(l.assistantEngineers)}</div>` : ''}</td>
+                <td><div>${fmtDate(l.completedAtMillis)}</div><div class="muted">Created: ${fmtDate(l.createdAtMillis)}</div></td>
+                <td><button class="icon-btn danger" title="Delete Log" aria-label="Delete Log" onclick="deleteHistoryLog(${l.id}, this)">${iconSvg('del')}</button></td>
+              </tr>`;
+            }).join('')}
+        </tbody>
+      </table>
+      ${paginationBarHtml(paged, 'reports')}
+    </div>`;
+}
+
+// --- 6. SETTINGS, SYNC, IMPORT, GROUPS & UPDATES ---
+function renderSettings(root, d) {
   root.innerHTML = `
     <div class="grid-2">
       <div class="card">
-        <strong>Export Filtered Reports (Excel &amp; PDF)</strong>
-        <div class="muted" style="margin-bottom:10px;">Select parameters and download directly to your PC</div>
-        <div class="grid-2">
-          <div><label>Machine</label><select id="rf-m" onchange="appState.reportFilter.machineId=this.value; renderTab()"><option value="">All Machines</option>${d.machines.map(m=>`<option value="${m.id}" ${rf.machineId==m.id?'selected':''}>${esc(m.assetCode)} · ${esc(m.name)}</option>`).join('')}</select></div>
-          <div><label>Custom Group</label><select id="rf-g" onchange="appState.reportFilter.groupId=this.value; renderTab()"><option value="">All Groups</option>${d.groups.map(g=>`<option value="${g.id}" ${rf.groupId==g.id?'selected':''}>${esc(g.name)}</option>`).join('')}</select></div>
-          <div><label>Person In Charge</label><select id="rf-p" onchange="appState.reportFilter.pic=this.value; renderTab()"><option value="">All Engineers</option>${pics.map(p=>`<option ${rf.pic===p?'selected':''}>${esc(p)}</option>`).join('')}</select></div>
-          <div><label>Cadence</label><select id="rf-c" onchange="appState.reportFilter.cadence=this.value; renderTab()"><option value="">All Cadences</option>${['ONCE','DAILY','WEEKLY','MONTHLY','YEARLY'].map(c=>`<option ${rf.cadence===c?'selected':''}>${c}</option>`).join('')}</select></div>
-          <div><label>Task Outcome</label><select id="rf-o" onchange="appState.reportFilter.outcome=this.value; renderTab()"><option value="">All Outcomes</option><option value="DONE" ${rf.outcome==='DONE'?'selected':''}>Done Only</option><option value="REJECTED" ${rf.outcome==='REJECTED'?'selected':''}>Rejected Only</option></select></div>
-          <div></div>
-          <div><label>From Date</label><input type="date" value="${esc(rf.start)}" onchange="appState.reportFilter.start=this.value; renderTab()" /></div>
-          <div><label>To Date</label><input type="date" value="${esc(rf.end)}" onchange="appState.reportFilter.end=this.value; renderTab()" /></div>
+        <strong>Excel Bulk Import (.xlsx)</strong>
+        <div class="muted" style="margin-bottom:10px;">Download the multi-sheet template or upload an Excel file from your PC. Duplicates across machines, tasks, and warehouse parts are automatically checked.</div>
+        <div class="row" style="margin-bottom:12px;">
+          <button onclick="downloadWithPin('/api/excel/template.xlsx', 'MachinaLog_Import_Template.xlsx')">${iconSvg('download')} Download Template (.xlsx)</button>
         </div>
-        <div class="row" style="margin-top:12px;">
-          <button class="btn-primary" onclick="downloadWithPin('/api/reports/export.xlsx?${qs}', 'MachinaLog_Report.xlsx')">Download Excel (.xlsx)</button>
-          <button onclick="downloadWithPin('/api/reports/export.pdf?${qs}', 'MachinaLog_Report.pdf')">Download PDF (.pdf)</button>
+        <label>Select Excel File (.xlsx)</label>
+        <div class="row">
+          <input type="file" id="upload-xlsx" accept=".xlsx" style="flex:1;" />
+          <button class="btn-primary btn-sm" onclick="uploadExcel(false, this)">${iconSvg('upload')} Smart Merge</button>
+          <button class="btn-sm btn-danger" onclick="uploadExcel(true, this)">Replace All</button>
         </div>
       </div>
 
       <div class="card">
-        <strong>Excel Bulk Import &amp; Portable Backup (.json)</strong>
-        <div class="muted" style="margin-bottom:10px;">Upload Excel workbooks or JSON backup files directly from your PC</div>
-        <div class="row" style="margin-bottom:10px;">
-          <button onclick="downloadWithPin('/api/excel/template.xlsx', 'MachinaLog_Import_Template.xlsx')">Download Excel Template (.xlsx)</button>
-          <button onclick="downloadWithPin('/api/backup/export.json', 'machinalog_backup.json')">Download Backup (.json)</button>
+        <strong>Portable Device Backup &amp; Restore (.json)</strong>
+        <div class="muted" style="margin-bottom:10px;">Export the entire Room database snapshot or merge/restore a backup JSON file.</div>
+        <div class="row" style="margin-bottom:12px;">
+          <button onclick="downloadWithPin('/api/backup/export.json', 'machinalog_backup.json')">${iconSvg('download')} Download Backup (.json)</button>
         </div>
-        <div style="margin-bottom:10px;">
-          <label>Import Excel (.xlsx) from PC · Auto-checks duplicates (Warehouse, Machines &amp; Tasks)</label>
-          <div class="row">
-            <input type="file" id="upload-xlsx" accept=".xlsx" style="flex:1;" />
-            <button class="btn-primary btn-sm" onclick="uploadExcel(false)">Smart Merge</button>
-            <button class="btn-sm btn-danger" onclick="uploadExcel(true)">Replace All</button>
-          </div>
-        </div>
-        <div>
-          <label>Restore / Merge Backup (.json) from PC</label>
-          <div class="row">
-            <input type="file" id="upload-json" accept=".json" style="flex:1;" />
-            <button class="btn-primary btn-sm" onclick="uploadBackup('MERGE')">Merge Sync</button>
-            <button class="btn-sm btn-danger" onclick="uploadBackup('REPLACE')">Replace All</button>
-          </div>
+        <label>Restore / Merge Backup (.json)</label>
+        <div class="row">
+          <input type="file" id="upload-json" accept=".json" style="flex:1;" />
+          <button class="btn-primary btn-sm" onclick="uploadBackup('MERGE', this)">${iconSvg('upload')} Merge Sync</button>
+          <button class="btn-sm btn-danger" onclick="uploadBackup('REPLACE', this)">Replace All</button>
         </div>
       </div>
     </div>
@@ -2026,10 +2531,10 @@ function renderReports(root, d) {
     <div class="card">
       <div class="between" style="margin-bottom:8px;">
         <strong>Custom Groups (${d.groups.length})</strong>
-        <button class="btn-primary btn-sm" onclick="openGroupModal()">+ Add Group</button>
+        <button class="btn-primary btn-sm" onclick="openGroupModal()">${iconSvg('plus')} Add Group</button>
       </div>
       <div class="row">
-        ${d.groups.map(g => `<span class="pill pill-primary" style="padding:6px 10px;">${esc(g.name)} (${esc(g.scope)}) <button style="border:none;background:transparent;padding:0 0 0 6px;color:var(--danger);" onclick="deleteGroup(${g.id})">×</button></span>`).join('') || `<span class="muted">No custom groups created yet.</span>`}
+        ${d.groups.map(g => `<span class="pill pill-primary" style="padding:6px 10px;">${esc(g.name)} (${esc(g.scope)}) <button style="border:none;background:transparent;padding:0 0 0 6px;color:var(--danger);" title="Delete Group" onclick="deleteGroup(${g.id}, this)">×</button></span>`).join('') || `<span class="muted">No custom groups created yet.</span>`}
       </div>
     </div>
 
@@ -2041,68 +2546,108 @@ function renderReports(root, d) {
           ${appState.updateStatusText ? `<div style="font-size:12px;margin-top:4px;color:var(--primary);">${esc(appState.updateStatusText)}</div>` : ''}
           ${appState.latestReleaseInfo?.isUpdateAvailable ? `
             <div style="margin-top:6px;">
-              <a class="btn btn-primary btn-sm" style="text-decoration:none;display:inline-block;" href="${esc(appState.latestReleaseInfo.apkUrl || appState.latestReleaseInfo.htmlUrl)}" target="_blank" rel="noopener">
-                Download ${esc(appState.latestReleaseInfo.tagName)} APK
+              <a class="btn btn-primary btn-sm" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;" href="${esc(appState.latestReleaseInfo.apkUrl || appState.latestReleaseInfo.htmlUrl)}" target="_blank" rel="noopener">
+                ${iconSvg('download')} Download ${esc(appState.latestReleaseInfo.tagName)} APK
               </a>
             </div>` : ''}
         </div>
-        <button class="btn-sm" onclick="checkGithubReleaseWeb()">Check GitHub Releases</button>
+        <button class="btn-sm" onclick="checkGithubReleaseWeb(this)">${iconSvg('refresh')} Check GitHub Releases</button>
       </div>
     </div>`;
 }
 
 function parseVersionPartsWeb(raw) {
-  const cleaned = String(raw || '').trim().replace(/^[vV]/, '').split('-')[0].split('+')[0];
-  return cleaned.split('.').map(p => parseInt(p, 10)).filter(n => !Number.isNaN(n));
+  const cleaned = String(raw || '').trim().replace(/^[vV]/, '').split('+')[0];
+  const m = cleaned.match(/\d+(?:\.\d+)*/);
+  if (!m) return [];
+  return m[0].split('.').map(p => parseInt(p, 10)).filter(n => !Number.isNaN(n));
 }
 
-function isRemoteVersionNewerWeb(remoteTag, currentVersion) {
-  const r = parseVersionPartsWeb(remoteTag);
-  const c = parseVersionPartsWeb(currentVersion);
+function compareVersionsWeb(aRaw, bRaw) {
+  const r = parseVersionPartsWeb(aRaw);
+  const c = parseVersionPartsWeb(bRaw);
+  if (!r.length || !c.length) return 0;
   const len = Math.max(r.length, c.length);
-  if (!len) return false;
   for (let i = 0; i < len; i++) {
     const rv = r[i] || 0;
     const cv = c[i] || 0;
-    if (rv > cv) return true;
-    if (rv < cv) return false;
+    if (rv > cv) return 1;
+    if (rv < cv) return -1;
+  }
+  return 0;
+}
+
+function isRemoteVersionNewerWeb(remoteTag, currentVersion) {
+  const cmp = compareVersionsWeb(remoteTag, currentVersion);
+  if (cmp !== 0) return cmp > 0;
+  const r = parseVersionPartsWeb(remoteTag);
+  const c = parseVersionPartsWeb(currentVersion);
+  if (!r.length || !c.length) {
+    const nr = String(remoteTag || '').trim().replace(/^[vV]/, '').toLowerCase();
+    const nc = String(currentVersion || '').trim().replace(/^[vV]/, '').toLowerCase();
+    return Boolean(nr && nr !== nc);
   }
   return false;
 }
 
-async function checkGithubReleaseWeb() {
+async function checkGithubReleaseWeb(btnEl = null) {
   const repo = appState.data?.githubRepo || 'Lock001111/MachLog';
   const curVer = appState.data?.appVersionName || '1.0';
   appState.updateStatusText = 'Checking GitHub Releases...';
   renderTab();
-  try {
-    const resp = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+  await withBusy('Checking GitHub...', async () => {
+    const listResp = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=10`, {
       headers: { 'Accept': 'application/vnd.github+json' }
     });
-    if (resp.status === 404) {
+    let chosen = null;
+    if (listResp.ok) {
+      const arr = await listResp.json();
+      const nonDrafts = (Array.isArray(arr) ? arr : []).filter(r => r && !r.draft && r.tag_name);
+      if (nonDrafts.length > 0) {
+        chosen = nonDrafts.reduce((best, cur) => compareVersionsWeb(cur.tag_name, best.tag_name) > 0 ? cur : best, nonDrafts[0]);
+      }
+    }
+    if (!chosen) {
+      const latestResp = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+        headers: { 'Accept': 'application/vnd.github+json' }
+      });
+      if (latestResp.ok) chosen = await latestResp.json();
+    }
+
+    if (!chosen) {
       appState.latestReleaseInfo = null;
-      appState.updateStatusText = `No GitHub Releases published yet on ${repo}.`;
+      let tagMsg = `No published GitHub Releases found yet on ${repo}.`;
+      try {
+        const tagResp = await fetch(`https://api.github.com/repos/${repo}/tags?per_page=5`);
+        if (tagResp.ok) {
+          const tags = await tagResp.json();
+          if (Array.isArray(tags) && tags.length > 0 && tags[0].name) {
+            tagMsg = `Tag "${tags[0].name}" exists, but no published GitHub Release + APK was found. Check Actions workflow permissions (Read & write).`;
+          }
+        }
+      } catch (_) {}
+      appState.updateStatusText = tagMsg;
       renderTab();
       return;
     }
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const rel = await resp.json();
-    const tag = rel.tag_name || '';
-    const apkAsset = (rel.assets || []).find(a => String(a.name || '').toLowerCase().endsWith('.apk') && a.browser_download_url);
+
+    const tag = chosen.tag_name || '';
+    const apkAsset = (chosen.assets || []).find(a => String(a.name || '').toLowerCase().endsWith('.apk') && a.browser_download_url);
     const newer = isRemoteVersionNewerWeb(tag, curVer);
     appState.latestReleaseInfo = {
       tagName: tag,
-      htmlUrl: rel.html_url || `https://github.com/${repo}/releases`,
+      htmlUrl: chosen.html_url || `https://github.com/${repo}/releases`,
       apkUrl: apkAsset ? apkAsset.browser_download_url : null,
       isUpdateAvailable: newer
     };
     appState.updateStatusText = newer
-      ? `New release available: ${tag} (installed v${curVer})`
+      ? `New ${chosen.prerelease ? 'pre-release' : 'release'} available: ${tag} (installed v${curVer})`
       : `Up to date: installed v${curVer} matches latest ${tag}`;
-  } catch (e) {
+    renderTab();
+  }, btnEl).catch(e => {
     appState.updateStatusText = 'Update check failed: ' + e.message;
-  }
-  renderTab();
+    renderTab();
+  });
 }
 
 function buildReportQuery() {
@@ -2119,7 +2664,7 @@ function buildReportQuery() {
 }
 
 async function downloadWithPin(url, fallbackName) {
-  try {
+  await withBusy('Preparing download...', async () => {
     const resp = await apiFetch(url);
     const blob = await resp.blob();
     const a = document.createElement('a');
@@ -2127,7 +2672,7 @@ async function downloadWithPin(url, fallbackName) {
     a.download = fallbackName;
     a.click();
     URL.revokeObjectURL(a.href);
-  } catch (e) { showToast('Download failed: ' + e.message); }
+  });
 }
 
 function triggerQuickExcelImport() {
@@ -2139,57 +2684,78 @@ function triggerQuickExcelImport() {
 async function handleQuickExcelUpload(input) {
   const file = input.files[0];
   if (!file) return;
-  const resp = await apiFetch('/api/excel/import?replace=false', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/octet-stream' },
-    body: await file.arrayBuffer()
+  await withBusy('Importing Excel...', async () => {
+    const resp = await apiFetch('/api/excel/import?replace=false', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: await file.arrayBuffer()
+    });
+    const json = await resp.json();
+    if (!resp.ok || !json.ok) throw new Error(json.message || 'Excel import failed');
+    showToast(json.message);
+    await refreshState(true);
   });
-  const json = await resp.json();
-  if (!resp.ok || !json.ok) return showToast('Error: ' + json.message);
-  showToast(json.message); refreshState();
 }
 
-async function uploadExcel(replace) {
+async function uploadExcel(replace, btnEl) {
   const file = document.getElementById('upload-xlsx').files[0];
   if (!file) return showToast('Select an .xlsx file first');
   if (replace && !confirm('Replace all existing records with this Excel workbook?')) return;
-  const resp = await apiFetch(`/api/excel/import?replace=${replace}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/octet-stream' },
-    body: await file.arrayBuffer()
-  });
-  const json = await resp.json();
-  if (!resp.ok || !json.ok) return showToast('Error: ' + json.message);
-  showToast(json.message); refreshState();
+  await withBusy('Importing Excel...', async () => {
+    const resp = await apiFetch(`/api/excel/import?replace=${replace}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: await file.arrayBuffer()
+    });
+    const json = await resp.json();
+    if (!resp.ok || !json.ok) throw new Error(json.message || 'Excel import failed');
+    showToast(json.message);
+    await refreshState(true);
+  }, btnEl);
 }
 
-async function uploadBackup(mode) {
+async function uploadBackup(mode, btnEl) {
   const file = document.getElementById('upload-json').files[0];
   if (!file) return showToast('Select a .json backup file first');
   if (mode === 'REPLACE' && !confirm('Replace all device records from this backup file?')) return;
-  const resp = await apiFetch(`/api/backup/import?mode=${mode}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: await file.text()
-  });
-  const json = await resp.json();
-  if (!resp.ok || !json.ok) return showToast('Error: ' + json.message);
-  showToast(json.message); refreshState();
+  await withBusy('Restoring backup...', async () => {
+    const resp = await apiFetch(`/api/backup/import?mode=${mode}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: await file.text()
+    });
+    const json = await resp.json();
+    if (!resp.ok || !json.ok) throw new Error(json.message || 'Backup import failed');
+    showToast(json.message);
+    await refreshState(true);
+  }, btnEl);
 }
 
 function openGroupModal() {
   openModal('New Custom Group', `
     <div><label>Group Name *</label><input id="g-name" placeholder="e.g. Assembly Line B" /></div>
     <div><label>Scope</label><select id="g-scope"><option value="ALL">Machines &amp; Tasks</option><option value="MACHINE">Machines Only</option><option value="TASK">Tasks Only</option></select></div>
-  `, `<button class="btn-primary" onclick="saveGroup()">Save Group</button>`);
+  `, `<button class="btn-primary" onclick="saveGroup(this)">Save Group</button>`);
 }
-async function saveGroup() {
+
+async function saveGroup(btnEl) {
   const name = document.getElementById('g-name').value.trim();
   if (!name) return showToast('Group name is required');
-  await apiJson('/api/groups', 'POST', { name, scope: document.getElementById('g-scope').value, colorKey: 'COBALT' });
-  closeModal(); showToast('Group saved'); refreshState();
+  await withBusy('Saving group...', async () => {
+    await apiJson('/api/groups', 'POST', { name, scope: document.getElementById('g-scope').value, colorKey: 'COBALT' });
+    closeModal();
+    showToast('Group saved');
+    await refreshState(true);
+  }, btnEl);
 }
-async function deleteGroup(id) { if (confirm('Delete custom group?')) { await apiJson(`/api/groups/${id}`, 'DELETE'); refreshState(); } }
+
+async function deleteGroup(id, btnEl) {
+  if (!confirm('Delete custom group?')) return;
+  await withBusy('Deleting group...', async () => {
+    await apiJson(`/api/groups/${id}`, 'DELETE');
+    await refreshState(true);
+  }, btnEl);
+}
 
 function openModal(title, bodyHtml, footerHtml) {
   document.getElementById('modal-title').textContent = title;

@@ -80,9 +80,11 @@ import com.example.ui.TaskGroupBy
 import com.example.ui.TasksFilterState
 import com.example.ui.TodoFilterState
 import com.example.ui.components.CadencePill
+import com.example.ui.components.CollapsibleFilterPanel
 import com.example.ui.components.CompactSearchField
 import com.example.ui.components.EmptyStateCard
 import com.example.ui.components.GroupBadge
+import com.example.ui.components.ListPaginationFooter
 import com.example.ui.components.OverdueAlertBanner
 import com.example.ui.components.PriorityPill
 import com.example.ui.components.StatusPill
@@ -103,7 +105,7 @@ fun TasksScreen(
     onManageGroups: () -> Unit,
     onImportExcel: () -> Unit,
     onUpdateTodoFilter: ((TodoFilterState) -> TodoFilterState) -> Unit,
-    onSetTodoPageSize: (Int) -> Unit,
+    onSetListPageSize: (Int) -> Unit,
     onToggleTodoComplete: (TodoReminderEntity) -> Unit,
     onAddTodo: () -> Unit,
     onEditTodo: (TodoReminderEntity) -> Unit,
@@ -142,7 +144,7 @@ fun TasksScreen(
             1 -> TodoRemindersSubTab(
                 state = state,
                 onUpdateFilter = onUpdateTodoFilter,
-                onSetPageSize = onSetTodoPageSize,
+                onSetPageSize = onSetListPageSize,
                 onToggleComplete = onToggleTodoComplete,
                 onAddTodo = onAddTodo,
                 onEditTodo = onEditTodo,
@@ -155,12 +157,14 @@ fun TasksScreen(
             2 -> TaskHistorySubTab(
                 state = state,
                 onUpdateFilter = onUpdateHistoryFilter,
+                onSetPageSize = onSetListPageSize,
                 onDeleteLog = onDeleteLog,
                 modifier = Modifier.weight(1f)
             )
             else -> ActiveTasksSubTab(
                 state = state,
                 onUpdateFilter = onUpdateFilter,
+                onSetPageSize = onSetListPageSize,
                 onAddTask = onAddTask,
                 onEditTask = onEditTask,
                 onCompleteTask = onCompleteTask,
@@ -177,6 +181,7 @@ fun TasksScreen(
 private fun ActiveTasksSubTab(
     state: MachinaUiState,
     onUpdateFilter: ((TasksFilterState) -> TasksFilterState) -> Unit,
+    onSetPageSize: (Int) -> Unit,
     onAddTask: () -> Unit,
     onEditTask: (MaintenanceTaskEntity) -> Unit,
     onCompleteTask: (MaintenanceTaskEntity) -> Unit,
@@ -189,6 +194,7 @@ private fun ActiveTasksSubTab(
     val machinesById = remember(state.machines) { state.machines.associateBy { it.id } }
     val groupsById = remember(state.groups) { state.groups.associateBy { it.id } }
     val filter = state.tasksFilter
+    val pageSize = state.preferences.todoPageSize.let { if (it in listOf(25, 50, 100)) it else 25 }
 
     val overdueCount = remember(state.tasks, now) {
         state.tasks.count { it.deadlineMillis < now }
@@ -222,25 +228,37 @@ private fun ActiveTasksSubTab(
         }
     }
 
-    val groupedSections = remember(filteredTasks, filter.groupBy, machinesById, groupsById) {
+    val pagedTasks = remember(filteredTasks, filter.currentPage, pageSize) {
+        paginateItems(filteredTasks, filter.currentPage, pageSize)
+    }
+
+    val groupedSections = remember(pagedTasks.items, filter.groupBy, machinesById, groupsById) {
         when (filter.groupBy) {
-            TaskGroupBy.NONE -> listOf("All Scheduled Tasks" to filteredTasks)
+            TaskGroupBy.NONE -> listOf("All Scheduled Tasks" to pagedTasks.items)
             TaskGroupBy.CADENCE -> Cadence.entries.mapNotNull { cad ->
-                val list = filteredTasks.filter { it.cadence == cad }
+                val list = pagedTasks.items.filter { it.cadence == cad }
                 if (list.isEmpty()) null else "${cad.label} Maintenance" to list
             }
-            TaskGroupBy.MACHINE -> filteredTasks.groupBy { task ->
+            TaskGroupBy.MACHINE -> pagedTasks.items.groupBy { task ->
                 machinesById[task.machineId]?.let { "${it.assetCode} · ${it.name}" } ?: "Unknown Machine"
             }.toList()
-            TaskGroupBy.PIC -> filteredTasks.groupBy { task ->
+            TaskGroupBy.PIC -> pagedTasks.items.groupBy { task ->
                 task.personInCharge.ifBlank { "Unassigned" }
             }.toList()
-            TaskGroupBy.CUSTOM_GROUP -> filteredTasks.groupBy { task ->
+            TaskGroupBy.CUSTOM_GROUP -> pagedTasks.items.groupBy { task ->
                 val machine = machinesById[task.machineId]
                 val gid = task.groupId ?: machine?.groupId
                 gid?.let { groupsById[it]?.name } ?: "Ungrouped"
             }.toList()
         }
+    }
+
+    val activeFilterCount = remember(filter) {
+        (if (filter.cadence != null) 1 else 0) +
+            (if (filter.priority != null) 1 else 0) +
+            (if (filter.overdueOnly) 1 else 0) +
+            (if (filter.groupId != null) 1 else 0) +
+            (if (!filter.picFilter.isNullOrBlank()) 1 else 0)
     }
 
     val collapsedGroups = remember { mutableStateMapOf<String, Boolean>() }
@@ -258,7 +276,7 @@ private fun ActiveTasksSubTab(
                     overdueCount = overdueCount,
                     filterActive = filter.overdueOnly,
                     onToggleFilter = {
-                        onUpdateFilter { it.copy(overdueOnly = !it.overdueOnly) }
+                        onUpdateFilter { it.copy(overdueOnly = !it.overdueOnly, currentPage = 0) }
                     }
                 )
             }
@@ -273,7 +291,7 @@ private fun ActiveTasksSubTab(
                 ) {
                     CompactSearchField(
                         value = filter.searchQuery,
-                        onValueChange = { q -> onUpdateFilter { it.copy(searchQuery = q) } },
+                        onValueChange = { q -> onUpdateFilter { it.copy(searchQuery = q, currentPage = 0) } },
                         placeholder = "Search machine, task, or PIC...",
                         searchTag = "tasks_search_input",
                         contentDescription = "Search tasks",
@@ -308,148 +326,166 @@ private fun ActiveTasksSubTab(
                     }
                 }
 
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                ) {
-                    FilterChip(
-                        selected = filter.cadence == null && !filter.overdueOnly,
-                        onClick = { onUpdateFilter { it.copy(cadence = null, overdueOnly = false) } },
-                        label = { Text("All (${state.tasks.size})") },
-                        modifier = Modifier.testTag("cadence_chip_all")
-                    )
-                    Cadence.entries.forEach { cad ->
-                        val count = state.tasks.count { it.cadence == cad }
-                        FilterChip(
-                            selected = filter.cadence == cad,
-                            onClick = {
-                                onUpdateFilter {
-                                    it.copy(cadence = if (it.cadence == cad) null else cad)
-                                }
-                            },
-                            label = { Text("${cad.label} ($count)") },
-                            modifier = Modifier.testTag("cadence_chip_${cad.name.lowercase()}")
-                        )
-                    }
-                    Box {
-                        FilterChip(
-                            selected = !filter.picFilter.isNullOrBlank(),
-                            onClick = { showPicMenu = true },
-                            leadingIcon = {
-                                Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(16.dp))
-                            },
-                            label = { Text(filter.picFilter ?: "All PICs") },
-                            modifier = Modifier.testTag("pic_filter_chip")
-                        )
-                        DropdownMenu(
-                            expanded = showPicMenu,
-                            onDismissRequest = { showPicMenu = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("All Engineers") },
-                                onClick = {
-                                    onUpdateFilter { it.copy(picFilter = null) }
-                                    showPicMenu = false
-                                }
+                CollapsibleFilterPanel(
+                    activeFilterCount = activeFilterCount,
+                    onResetFilters = {
+                        onUpdateFilter {
+                            TasksFilterState(
+                                groupBy = it.groupBy,
+                                sortAscending = it.sortAscending,
+                                searchQuery = it.searchQuery
                             )
-                            state.knownEngineers.forEach { pic ->
+                        }
+                    },
+                    testTagPrefix = "tasks",
+                    inlineQuickActions = {
+                        FilterChip(
+                            selected = true,
+                            onClick = { onUpdateFilter { it.copy(sortAscending = !it.sortAscending, currentPage = 0) } },
+                            leadingIcon = {
+                                Icon(Icons.Filled.Sort, contentDescription = null, modifier = Modifier.size(16.dp))
+                            },
+                            label = {
+                                Text(if (filter.sortAscending) "Date ↑ Soonest" else "Date ↓ Latest")
+                            },
+                            modifier = Modifier.testTag("task_date_sort_chip")
+                        )
+                        TextButton(
+                            onClick = onManageGroups,
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("manage_groups_shortcut")
+                        ) {
+                            Icon(Icons.Filled.FolderSpecial, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Groups")
+                        }
+                        OutlinedButton(
+                            onClick = onImportExcel,
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("tasks_import_excel_button")
+                        ) {
+                            Icon(Icons.Filled.TableView, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Import")
+                        }
+                    }
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                    ) {
+                        FilterChip(
+                            selected = filter.cadence == null && !filter.overdueOnly,
+                            onClick = { onUpdateFilter { it.copy(cadence = null, overdueOnly = false, currentPage = 0) } },
+                            label = { Text("All (${state.tasks.size})") },
+                            modifier = Modifier.testTag("cadence_chip_all")
+                        )
+                        Cadence.entries.forEach { cad ->
+                            val count = state.tasks.count { it.cadence == cad }
+                            FilterChip(
+                                selected = filter.cadence == cad,
+                                onClick = {
+                                    onUpdateFilter {
+                                        it.copy(cadence = if (it.cadence == cad) null else cad, currentPage = 0)
+                                    }
+                                },
+                                label = { Text("${cad.label} ($count)") },
+                                modifier = Modifier.testTag("cadence_chip_${cad.name.lowercase()}")
+                            )
+                        }
+                    }
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                    ) {
+                        FilterChip(
+                            selected = filter.priority == null,
+                            onClick = { onUpdateFilter { it.copy(priority = null, currentPage = 0) } },
+                            label = { Text("All Priorities") },
+                            modifier = Modifier.testTag("task_priority_chip_all")
+                        )
+                        ReminderPriority.entries.forEach { prio ->
+                            val pCount = state.tasks.count { it.priority == prio }
+                            FilterChip(
+                                selected = filter.priority == prio,
+                                onClick = {
+                                    onUpdateFilter {
+                                        it.copy(priority = if (it.priority == prio) null else prio, currentPage = 0)
+                                    }
+                                },
+                                label = { Text("${prio.label} ($pCount)") },
+                                modifier = Modifier.testTag("task_priority_chip_${prio.name.lowercase()}")
+                            )
+                        }
+                        Box {
+                            FilterChip(
+                                selected = !filter.picFilter.isNullOrBlank(),
+                                onClick = { showPicMenu = true },
+                                leadingIcon = {
+                                    Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(16.dp))
+                                },
+                                label = { Text(filter.picFilter ?: "All PICs") },
+                                modifier = Modifier.testTag("pic_filter_chip")
+                            )
+                            DropdownMenu(
+                                expanded = showPicMenu,
+                                onDismissRequest = { showPicMenu = false }
+                            ) {
                                 DropdownMenuItem(
-                                    text = { Text(pic) },
+                                    text = { Text("All Engineers") },
                                     onClick = {
-                                        onUpdateFilter { it.copy(picFilter = pic) }
+                                        onUpdateFilter { it.copy(picFilter = null, currentPage = 0) }
                                         showPicMenu = false
                                     }
                                 )
+                                state.knownEngineers.forEach { pic ->
+                                    DropdownMenuItem(
+                                        text = { Text(pic) },
+                                        onClick = {
+                                            onUpdateFilter { it.copy(picFilter = pic, currentPage = 0) }
+                                            showPicMenu = false
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
-                }
 
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                ) {
-                    FilterChip(
-                        selected = true,
-                        onClick = { onUpdateFilter { it.copy(sortAscending = !it.sortAscending) } },
-                        leadingIcon = {
-                            Icon(Icons.Filled.Sort, contentDescription = null, modifier = Modifier.size(16.dp))
-                        },
-                        label = {
-                            Text(if (filter.sortAscending) "Date ↑ Soonest" else "Date ↓ Latest")
-                        },
-                        modifier = Modifier.testTag("task_date_sort_chip")
-                    )
-                    FilterChip(
-                        selected = filter.priority == null,
-                        onClick = { onUpdateFilter { it.copy(priority = null) } },
-                        label = { Text("All Priorities") },
-                        modifier = Modifier.testTag("task_priority_chip_all")
-                    )
-                    ReminderPriority.entries.forEach { prio ->
-                        val pCount = state.tasks.count { it.priority == prio }
-                        FilterChip(
-                            selected = filter.priority == prio,
-                            onClick = {
-                                onUpdateFilter {
-                                    it.copy(priority = if (it.priority == prio) null else prio)
-                                }
-                            },
-                            label = { Text("${prio.label} ($pCount)") },
-                            modifier = Modifier.testTag("task_priority_chip_${prio.name.lowercase()}")
-                        )
-                    }
-                }
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                ) {
-                    FilterChip(
-                        selected = filter.groupId == null,
-                        onClick = { onUpdateFilter { it.copy(groupId = null) } },
-                        label = { Text("All Groups") }
-                    )
-                    state.groups.forEach { group ->
-                        FilterChip(
-                            selected = filter.groupId == group.id,
-                            onClick = {
-                                onUpdateFilter {
-                                    it.copy(groupId = if (it.groupId == group.id) null else group.id)
-                                }
-                            },
-                            label = { Text(group.name) },
-                            modifier = Modifier.testTag("task_group_chip_${group.id}")
-                        )
-                    }
-                    TextButton(
-                        onClick = onManageGroups,
-                        modifier = Modifier
-                            .minimumInteractiveComponentSize()
-                            .testTag("manage_groups_shortcut")
-                    ) {
-                        Icon(Icons.Filled.FolderSpecial, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Manage Groups")
-                    }
-                    OutlinedButton(
-                        onClick = onImportExcel,
-                        modifier = Modifier
-                            .minimumInteractiveComponentSize()
-                            .testTag("tasks_import_excel_button")
-                    ) {
-                        Icon(Icons.Filled.TableView, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Import Excel")
+                    if (state.groups.isNotEmpty()) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                        ) {
+                            FilterChip(
+                                selected = filter.groupId == null,
+                                onClick = { onUpdateFilter { it.copy(groupId = null, currentPage = 0) } },
+                                label = { Text("All Groups") }
+                            )
+                            state.groups.forEach { group ->
+                                FilterChip(
+                                    selected = filter.groupId == group.id,
+                                    onClick = {
+                                        onUpdateFilter {
+                                            it.copy(groupId = if (it.groupId == group.id) null else group.id, currentPage = 0)
+                                        }
+                                    },
+                                    label = { Text(group.name) },
+                                    modifier = Modifier.testTag("task_group_chip_${group.id}")
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -527,6 +563,27 @@ private fun ActiveTasksSubTab(
                         )
                     }
                 }
+            }
+
+            item(key = "tasks_pagination_footer") {
+                ListPaginationFooter(
+                    startNumber = pagedTasks.startNumber,
+                    endNumber = pagedTasks.endNumber,
+                    totalItems = pagedTasks.totalItems,
+                    safePageIndex = pagedTasks.safePageIndex,
+                    totalPages = pagedTasks.totalPages,
+                    pageSize = pageSize,
+                    onPageSizeChange = onSetPageSize,
+                    onPrevPage = {
+                        onUpdateFilter { it.copy(currentPage = (pagedTasks.safePageIndex - 1).coerceAtLeast(0)) }
+                    },
+                    onNextPage = {
+                        onUpdateFilter {
+                            it.copy(currentPage = (pagedTasks.safePageIndex + 1).coerceAtMost(pagedTasks.totalPages - 1))
+                        }
+                    },
+                    testTagPrefix = "tasks"
+                )
             }
         }
 

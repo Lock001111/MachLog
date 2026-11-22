@@ -51,8 +51,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,6 +75,7 @@ import com.example.ui.components.CadencePill
 import com.example.ui.components.CompactSearchField
 import com.example.ui.components.EmptyStateCard
 import com.example.ui.components.KpiMetricCard
+import com.example.ui.components.ListPaginationFooter
 import com.example.ui.components.PriorityPill
 import com.example.ui.components.StatusPill
 import com.example.ui.components.TaskOutcomePill
@@ -81,6 +84,7 @@ import com.example.ui.theme.LocalMachinaColors
 @Composable
 fun EngineersScreen(
     state: MachinaUiState,
+    onSetListPageSize: (Int) -> Unit,
     onAddEngineer: () -> Unit,
     onEditEngineer: (EngineerEntity) -> Unit,
     onDeleteEngineer: (EngineerEntity) -> Unit,
@@ -91,11 +95,13 @@ fun EngineersScreen(
     onViewEngineerHistoryInTab: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var searchQuery by remember { mutableStateOf("") }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var currentPage by rememberSaveable { mutableIntStateOf(0) }
     var inspectingEngineerId by remember { mutableStateOf<Long?>(null) }
     var inspectingHistoryEngineerId by remember { mutableStateOf<Long?>(null) }
     val sem = LocalMachinaColors.current
     val machinesById = remember(state.machines) { state.machines.associateBy { it.id } }
+    val pageSize = state.preferences.todoPageSize.let { if (it in listOf(25, 50, 100)) it else 25 }
 
     val filtered = remember(state.engineers, searchQuery) {
         val q = searchQuery.trim().lowercase()
@@ -106,6 +112,9 @@ fun EngineersScreen(
                 eng.role.lowercase().contains(q) ||
                 eng.shift.lowercase().contains(q)
         }
+    }
+    val paged = remember(filtered, currentPage, pageSize) {
+        paginateItems(filtered, currentPage, pageSize)
     }
 
     val totalAssignedTasks = remember(state.tasks) { state.tasks.size }
@@ -150,7 +159,10 @@ fun EngineersScreen(
         item(key = "engineers_search") {
             CompactSearchField(
                 value = searchQuery,
-                onValueChange = { searchQuery = it },
+                onValueChange = {
+                    searchQuery = it
+                    currentPage = 0
+                },
                 placeholder = "Search engineer name, badge ID, role, shift...",
                 searchTag = "engineers_search_input",
                 contentDescription = "Search engineers",
@@ -169,7 +181,7 @@ fun EngineersScreen(
                 )
             }
         } else {
-            items(filtered, key = { "eng_${it.id}" }) { engineer ->
+            items(paged.items, key = { "eng_${it.id}" }) { engineer ->
                 val activePicCount = state.tasks.count {
                     it.personInCharge.equals(engineer.name, ignoreCase = true) ||
                         parseEngineerList(it.assistantEngineers).any { a -> a.equals(engineer.name, ignoreCase = true) }
@@ -187,6 +199,24 @@ fun EngineersScreen(
                     onInspectHistoryTasks = { inspectingHistoryEngineerId = engineer.id },
                     onEdit = { onEditEngineer(engineer) },
                     onDelete = { onDeleteEngineer(engineer) }
+                )
+            }
+
+            item(key = "engineers_pagination_footer") {
+                ListPaginationFooter(
+                    startNumber = paged.startNumber,
+                    endNumber = paged.endNumber,
+                    totalItems = paged.totalItems,
+                    safePageIndex = paged.safePageIndex,
+                    totalPages = paged.totalPages,
+                    pageSize = pageSize,
+                    onPageSizeChange = { newSize ->
+                        currentPage = 0
+                        onSetListPageSize(newSize)
+                    },
+                    onPrevPage = { currentPage = (paged.safePageIndex - 1).coerceAtLeast(0) },
+                    onNextPage = { currentPage = (paged.safePageIndex + 1).coerceAtMost(paged.totalPages - 1) },
+                    testTagPrefix = "engineers"
                 )
             }
         }
@@ -268,152 +298,183 @@ private fun EngineerCard(
             .fillMaxWidth()
             .testTag("engineer_card_${engineer.id}")
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        Column(
+            verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.padding(14.dp)
         ) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .size(46.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Text(
-                    text = initials,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-            }
-
-            Column(
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.weight(1f)
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer)
                 ) {
                     Text(
-                        text = engineer.name,
+                        text = initials,
                         style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
-                    if (engineer.employeeCode.isNotBlank()) {
-                        StatusPill(
-                            text = engineer.employeeCode,
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
                 }
-                Text(
-                    text = "${engineer.role} · ${engineer.shift}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
-                    Surface(
-                        onClick = onInspectActiveTasks,
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (activeCount > 0) sem.infoContainer else MaterialTheme.colorScheme.surfaceVariant,
-                        border = BorderStroke(
-                            width = 1.dp,
-                            color = if (activeCount > 0) sem.info.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outlineVariant
-                        ),
-                        modifier = Modifier
-                            .minimumInteractiveComponentSize()
-                            .testTag("engineer_active_tasks_button_${engineer.id}")
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = "$activeCount Active Tasks",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (activeCount > 0) sem.info else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.width(2.dp))
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDescription = "View active tasks",
-                                tint = if (activeCount > 0) sem.info else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(14.dp)
+                        Text(
+                            text = engineer.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (engineer.employeeCode.isNotBlank()) {
+                            StatusPill(
+                                text = engineer.employeeCode,
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
-                    Surface(
-                        onClick = onInspectHistoryTasks,
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (historyCount > 0) sem.operationalContainer else MaterialTheme.colorScheme.surfaceVariant,
-                        border = BorderStroke(
-                            width = 1.dp,
-                            color = if (historyCount > 0) sem.operational.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outlineVariant
-                        ),
+                    Text(
+                        text = "${engineer.role} · ${engineer.shift}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = onEdit,
                         modifier = Modifier
                             .minimumInteractiveComponentSize()
-                            .testTag("engineer_history_tasks_button_${engineer.id}")
+                            .testTag("edit_engineer_button_${engineer.id}")
+                    ) {
+                        Icon(Icons.Filled.Edit, contentDescription = "Edit engineer")
+                    }
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("delete_engineer_button_${engineer.id}")
+                    ) {
+                        Icon(
+                            Icons.Filled.DeleteOutline,
+                            contentDescription = "Remove engineer",
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            }
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Surface(
+                    onClick = onInspectActiveTasks,
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (activeCount > 0) sem.infoContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = if (activeCount > 0) sem.info.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outlineVariant
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .minimumInteractiveComponentSize()
+                        .testTag("engineer_active_tasks_button_${engineer.id}")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.weight(1f, fill = false)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.TaskAlt,
+                                contentDescription = null,
+                                tint = if (activeCount > 0) sem.info else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "$activeCount Active",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (activeCount > 0) sem.info else MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = "View active tasks",
+                            tint = if (activeCount > 0) sem.info else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+
+                Surface(
+                    onClick = onInspectHistoryTasks,
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (historyCount > 0) sem.operationalContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = if (historyCount > 0) sem.operational.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outlineVariant
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .minimumInteractiveComponentSize()
+                        .testTag("engineer_history_tasks_button_${engineer.id}")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.weight(1f, fill = false)
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.History,
                                 contentDescription = null,
                                 tint = if (historyCount > 0) sem.operational else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(13.dp)
+                                modifier = Modifier.size(16.dp)
                             )
-                            Spacer(Modifier.width(4.dp))
                             Text(
-                                text = "$historyCount Logged",
-                                style = MaterialTheme.typography.labelSmall,
+                                text = "$historyCount History",
+                                style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.SemiBold,
-                                color = if (historyCount > 0) sem.operational else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.width(2.dp))
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDescription = "View historical tasks",
-                                tint = if (historyCount > 0) sem.operational else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(14.dp)
+                                color = if (historyCount > 0) sem.operational else MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = "View historical tasks",
+                            tint = if (historyCount > 0) sem.operational else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
                     }
-                }
-            }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(
-                    onClick = onEdit,
-                    modifier = Modifier
-                        .minimumInteractiveComponentSize()
-                        .testTag("edit_engineer_button_${engineer.id}")
-                ) {
-                    Icon(Icons.Filled.Edit, contentDescription = "Edit engineer")
-                }
-                IconButton(
-                    onClick = onDelete,
-                    modifier = Modifier
-                        .minimumInteractiveComponentSize()
-                        .testTag("delete_engineer_button_${engineer.id}")
-                ) {
-                    Icon(
-                        Icons.Filled.DeleteOutline,
-                        contentDescription = "Remove engineer",
-                        tint = MaterialTheme.colorScheme.error
-                    )
                 }
             }
         }

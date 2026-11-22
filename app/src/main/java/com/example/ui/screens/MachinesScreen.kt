@@ -78,9 +78,11 @@ import com.example.ui.MachinaUiState
 import com.example.ui.MachineFilterState
 import com.example.ui.MachineGroupBy
 import com.example.ui.components.CadencePill
+import com.example.ui.components.CollapsibleFilterPanel
 import com.example.ui.components.CompactSearchField
 import com.example.ui.components.EmptyStateCard
 import com.example.ui.components.GroupBadge
+import com.example.ui.components.ListPaginationFooter
 import com.example.ui.components.MachineStatusBadge
 import com.example.ui.components.PriorityPill
 import com.example.ui.components.SeverityPill
@@ -93,6 +95,7 @@ fun MachinesScreen(
     state: MachinaUiState,
     isExpanded: Boolean,
     onUpdateFilter: ((MachineFilterState) -> MachineFilterState) -> Unit,
+    onSetListPageSize: (Int) -> Unit,
     onSelectMachine: (Long?) -> Unit,
     onAddMachine: () -> Unit,
     onEditMachine: (MachineEntity) -> Unit,
@@ -139,6 +142,7 @@ fun MachinesScreen(
                 state = state,
                 selectedMachineId = selectedMachine?.id,
                 onUpdateFilter = onUpdateFilter,
+                onSetPageSize = onSetListPageSize,
                 onClickMachine = { id -> onSelectMachine(id) },
                 onAddMachine = onAddMachine,
                 onManageGroups = onManageGroups,
@@ -187,6 +191,7 @@ fun MachinesScreen(
             state = state,
             selectedMachineId = null,
             onUpdateFilter = onUpdateFilter,
+            onSetPageSize = onSetListPageSize,
             onClickMachine = { id ->
                 onSelectMachine(id)
                 compactShowingDetail = true
@@ -204,6 +209,7 @@ private fun MachineListPane(
     state: MachinaUiState,
     selectedMachineId: Long?,
     onUpdateFilter: ((MachineFilterState) -> MachineFilterState) -> Unit,
+    onSetPageSize: (Int) -> Unit,
     onClickMachine: (Long) -> Unit,
     onAddMachine: () -> Unit,
     onManageGroups: () -> Unit,
@@ -213,6 +219,7 @@ private fun MachineListPane(
     val filter = state.machineFilter
     val groupsById = remember(state.groups) { state.groups.associateBy { it.id } }
     val sem = LocalMachinaColors.current
+    val pageSize = state.preferences.todoPageSize.let { if (it in listOf(25, 50, 100)) it else 25 }
     var showGroupByMenu by remember { mutableStateOf(false) }
 
     val operationalCount = state.machines.count { it.status == MachineStatus.OPERATIONAL }
@@ -233,17 +240,25 @@ private fun MachineListPane(
         }
     }
 
-    val grouped = remember(filteredMachines, filter.groupBy, groupsById) {
+    val pagedMachines = remember(filteredMachines, filter.currentPage, pageSize) {
+        paginateItems(filteredMachines, filter.currentPage, pageSize)
+    }
+
+    val grouped = remember(pagedMachines.items, filter.groupBy, groupsById) {
         when (filter.groupBy) {
-            MachineGroupBy.NONE -> listOf("All Machines" to filteredMachines)
+            MachineGroupBy.NONE -> listOf("All Machines" to pagedMachines.items)
             MachineGroupBy.STATUS -> MachineStatus.entries.mapNotNull { st ->
-                val list = filteredMachines.filter { it.status == st }
+                val list = pagedMachines.items.filter { it.status == st }
                 if (list.isEmpty()) null else st.label to list
             }
-            MachineGroupBy.CUSTOM_GROUP -> filteredMachines.groupBy { m ->
+            MachineGroupBy.CUSTOM_GROUP -> pagedMachines.items.groupBy { m ->
                 m.groupId?.let { groupsById[it]?.name } ?: "Ungrouped"
             }.toList()
         }
+    }
+
+    val activeFilterCount = remember(filter) {
+        (if (filter.status != null) 1 else 0) + (if (filter.groupId != null) 1 else 0)
     }
 
     LazyColumn(
@@ -293,7 +308,7 @@ private fun MachineListPane(
                 ) {
                     CompactSearchField(
                         value = filter.searchQuery,
-                        onValueChange = { q -> onUpdateFilter { it.copy(searchQuery = q) } },
+                        onValueChange = { q -> onUpdateFilter { it.copy(searchQuery = q, currentPage = 0) } },
                         placeholder = "Search asset code, machine, zone...",
                         searchTag = "machines_search_input",
                         contentDescription = "Search machines",
@@ -328,69 +343,96 @@ private fun MachineListPane(
                     }
                 }
 
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                ) {
-                    FilterChip(
-                        selected = filter.status == null,
-                        onClick = { onUpdateFilter { it.copy(status = null) } },
-                        label = { Text("All (${state.machines.size})") }
-                    )
-                    MachineStatus.entries.forEach { st ->
-                        FilterChip(
-                            selected = filter.status == st,
-                            onClick = {
-                                onUpdateFilter { it.copy(status = if (it.status == st) null else st) }
-                            },
-                            label = { Text(st.label) }
-                        )
+                CollapsibleFilterPanel(
+                    activeFilterCount = activeFilterCount,
+                    onResetFilters = {
+                        onUpdateFilter {
+                            MachineFilterState(
+                                groupBy = it.groupBy,
+                                searchQuery = it.searchQuery
+                            )
+                        }
+                    },
+                    testTagPrefix = "machines",
+                    inlineQuickActions = {
+                        TextButton(
+                            onClick = onManageGroups,
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("machines_manage_groups_button")
+                        ) {
+                            Icon(Icons.Filled.FolderSpecial, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Groups")
+                        }
+                        OutlinedButton(
+                            onClick = onImportExcel,
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("machines_import_excel_button")
+                        ) {
+                            Icon(Icons.Filled.TableView, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Import")
+                        }
                     }
-                }
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                    ) {
+                        FilterChip(
+                            selected = filter.status == null,
+                            onClick = { onUpdateFilter { it.copy(status = null, currentPage = 0) } },
+                            label = { Text("All (${state.machines.size})") }
+                        )
+                        MachineStatus.entries.forEach { st ->
+                            FilterChip(
+                                selected = filter.status == st,
+                                onClick = {
+                                    onUpdateFilter {
+                                        it.copy(
+                                            status = if (it.status == st) null else st,
+                                            currentPage = 0
+                                        )
+                                    }
+                                },
+                                label = { Text(st.label) }
+                            )
+                        }
+                    }
 
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                ) {
-                    FilterChip(
-                        selected = filter.groupId == null,
-                        onClick = { onUpdateFilter { it.copy(groupId = null) } },
-                        label = { Text("All Groups") }
-                    )
-                    state.groups.forEach { group ->
-                        FilterChip(
-                            selected = filter.groupId == group.id,
-                            onClick = {
-                                onUpdateFilter { it.copy(groupId = if (it.groupId == group.id) null else group.id) }
-                            },
-                            label = { Text(group.name) }
-                        )
-                    }
-                    TextButton(
-                        onClick = onManageGroups,
-                        modifier = Modifier
-                            .minimumInteractiveComponentSize()
-                            .testTag("machines_manage_groups_button")
-                    ) {
-                        Icon(Icons.Filled.FolderSpecial, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Groups")
-                    }
-                    OutlinedButton(
-                        onClick = onImportExcel,
-                        modifier = Modifier
-                            .minimumInteractiveComponentSize()
-                            .testTag("machines_import_excel_button")
-                    ) {
-                        Icon(Icons.Filled.TableView, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Import Excel")
+                    if (state.groups.isNotEmpty()) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                        ) {
+                            FilterChip(
+                                selected = filter.groupId == null,
+                                onClick = { onUpdateFilter { it.copy(groupId = null, currentPage = 0) } },
+                                label = { Text("All Groups") }
+                            )
+                            state.groups.forEach { group ->
+                                FilterChip(
+                                    selected = filter.groupId == group.id,
+                                    onClick = {
+                                        onUpdateFilter {
+                                            it.copy(
+                                                groupId = if (it.groupId == group.id) null else group.id,
+                                                currentPage = 0
+                                            )
+                                        }
+                                    },
+                                    label = { Text(group.name) }
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -433,6 +475,27 @@ private fun MachineListPane(
                         onClick = { onClickMachine(machine.id) }
                     )
                 }
+            }
+
+            item(key = "machines_pagination_footer") {
+                ListPaginationFooter(
+                    startNumber = pagedMachines.startNumber,
+                    endNumber = pagedMachines.endNumber,
+                    totalItems = pagedMachines.totalItems,
+                    safePageIndex = pagedMachines.safePageIndex,
+                    totalPages = pagedMachines.totalPages,
+                    pageSize = pageSize,
+                    onPageSizeChange = onSetPageSize,
+                    onPrevPage = {
+                        onUpdateFilter { it.copy(currentPage = (pagedMachines.safePageIndex - 1).coerceAtLeast(0)) }
+                    },
+                    onNextPage = {
+                        onUpdateFilter {
+                            it.copy(currentPage = (pagedMachines.safePageIndex + 1).coerceAtMost(pagedMachines.totalPages - 1))
+                        }
+                    },
+                    testTagPrefix = "machines"
+                )
             }
         }
 

@@ -48,8 +48,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,8 +67,10 @@ import com.example.engine.Formatters
 import com.example.engine.ReportExportEngine
 import com.example.ui.MachinaUiState
 import com.example.ui.components.CadencePill
+import com.example.ui.components.CollapsibleFilterPanel
 import com.example.ui.components.EmptyStateCard
 import com.example.ui.components.KpiMetricCard
+import com.example.ui.components.ListPaginationFooter
 import com.example.ui.components.SeverityPill
 import com.example.ui.components.StatusPill
 import com.example.ui.components.TaskOutcomePill
@@ -84,6 +88,7 @@ enum class ReportPeriodPreset(val label: String, val daysBack: Long?) {
 fun ReportsScreen(
     state: MachinaUiState,
     isExpanded: Boolean,
+    onSetListPageSize: (Int) -> Unit,
     onUpdateReportFilter: ((ExportFilterParams) -> ExportFilterParams) -> Unit,
     onOpenExportSheet: (preferPdf: Boolean) -> Unit,
     onDeleteLog: (Long) -> Unit,
@@ -92,6 +97,8 @@ fun ReportsScreen(
     val params = state.reportFilter
     val sem = LocalMachinaColors.current
     val machinesById = remember(state.machines) { state.machines.associateBy { it.id } }
+    val pageSize = state.preferences.todoPageSize.let { if (it in listOf(25, 50, 100)) it else 25 }
+    var currentPage by rememberSaveable { mutableIntStateOf(0) }
 
     val dataset = remember(state.machines, state.groups, state.tasks, state.serviceLogs, params) {
         ReportExportEngine.filterDataset(
@@ -101,6 +108,9 @@ fun ReportsScreen(
             allTasks = state.tasks,
             allLogs = state.serviceLogs
         )
+    }
+    val pagedLogs = remember(dataset.logs, currentPage, pageSize) {
+        paginateItems(dataset.logs, currentPage, pageSize)
     }
 
     val totalLogs = dataset.logs.size
@@ -112,6 +122,16 @@ fun ReportsScreen(
     var showPicMenu by remember { mutableStateOf(false) }
     var showGroupMenu by remember { mutableStateOf(false) }
     var activePeriod by remember { mutableStateOf(ReportPeriodPreset.ALL) }
+
+    val activeFilterCount = remember(params, activePeriod) {
+        (if (params.machineId != null) 1 else 0) +
+            (if (!params.personInCharge.isNullOrBlank()) 1 else 0) +
+            (if (params.customGroupId != null) 1 else 0) +
+            (if (params.entryType != null) 1 else 0) +
+            (if (params.outcome != null) 1 else 0) +
+            (if (params.cadence != null) 1 else 0) +
+            (if (activePeriod != ReportPeriodPreset.ALL) 1 else 0)
+    }
 
     LazyColumn(
         contentPadding = PaddingValues(16.dp),
@@ -196,9 +216,17 @@ fun ReportsScreen(
             }
         }
 
-        // Parameter Filter Row
+        // Parameter Filter Panel (Collapsible)
         item(key = "report_filters") {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            CollapsibleFilterPanel(
+                activeFilterCount = activeFilterCount,
+                onResetFilters = {
+                    activePeriod = ReportPeriodPreset.ALL
+                    currentPage = 0
+                    onUpdateReportFilter { ExportFilterParams() }
+                },
+                testTagPrefix = "reports"
+            ) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier
@@ -219,6 +247,7 @@ fun ReportsScreen(
                             DropdownMenuItem(
                                 text = { Text("All Machines") },
                                 onClick = {
+                                    currentPage = 0
                                     onUpdateReportFilter { it.copy(machineId = null) }
                                     showMachineMenu = false
                                 }
@@ -227,6 +256,7 @@ fun ReportsScreen(
                                 DropdownMenuItem(
                                     text = { Text("${m.assetCode} · ${m.name}") },
                                     onClick = {
+                                        currentPage = 0
                                         onUpdateReportFilter { it.copy(machineId = m.id) }
                                         showMachineMenu = false
                                     }
@@ -248,6 +278,7 @@ fun ReportsScreen(
                             DropdownMenuItem(
                                 text = { Text("All Engineers") },
                                 onClick = {
+                                    currentPage = 0
                                     onUpdateReportFilter { it.copy(personInCharge = null) }
                                     showPicMenu = false
                                 }
@@ -256,6 +287,7 @@ fun ReportsScreen(
                                 DropdownMenuItem(
                                     text = { Text(pic) },
                                     onClick = {
+                                        currentPage = 0
                                         onUpdateReportFilter { it.copy(personInCharge = pic) }
                                         showPicMenu = false
                                     }
@@ -277,6 +309,7 @@ fun ReportsScreen(
                             DropdownMenuItem(
                                 text = { Text("All Custom Groups") },
                                 onClick = {
+                                    currentPage = 0
                                     onUpdateReportFilter { it.copy(customGroupId = null) }
                                     showGroupMenu = false
                                 }
@@ -285,22 +318,13 @@ fun ReportsScreen(
                                 DropdownMenuItem(
                                     text = { Text(g.name) },
                                     onClick = {
+                                        currentPage = 0
                                         onUpdateReportFilter { it.copy(customGroupId = g.id) }
                                         showGroupMenu = false
                                     }
                                 )
                             }
                         }
-                    }
-
-                    TextButton(
-                        onClick = {
-                            activePeriod = ReportPeriodPreset.ALL
-                            onUpdateReportFilter { ExportFilterParams() }
-                        },
-                        modifier = Modifier.minimumInteractiveComponentSize()
-                    ) {
-                        Text("Reset")
                     }
                 }
 
@@ -313,13 +337,17 @@ fun ReportsScreen(
                 ) {
                     FilterChip(
                         selected = params.entryType == null,
-                        onClick = { onUpdateReportFilter { it.copy(entryType = null) } },
+                        onClick = {
+                            currentPage = 0
+                            onUpdateReportFilter { it.copy(entryType = null) }
+                        },
                         label = { Text("All Types") }
                     )
                     ServiceEntryType.entries.forEach { type ->
                         FilterChip(
                             selected = params.entryType == type,
                             onClick = {
+                                currentPage = 0
                                 onUpdateReportFilter {
                                     it.copy(entryType = if (it.entryType == type) null else type)
                                 }
@@ -332,6 +360,7 @@ fun ReportsScreen(
                             selected = activePeriod == preset,
                             onClick = {
                                 activePeriod = preset
+                                currentPage = 0
                                 val start = preset.daysBack?.let {
                                     System.currentTimeMillis() - TimeUnit.DAYS.toMillis(it)
                                 }
@@ -351,7 +380,10 @@ fun ReportsScreen(
                 ) {
                     FilterChip(
                         selected = params.outcome == null,
-                        onClick = { onUpdateReportFilter { it.copy(outcome = null) } },
+                        onClick = {
+                            currentPage = 0
+                            onUpdateReportFilter { it.copy(outcome = null) }
+                        },
                         label = { Text("All Outcomes") },
                         modifier = Modifier.testTag("report_outcome_all")
                     )
@@ -359,6 +391,7 @@ fun ReportsScreen(
                         FilterChip(
                             selected = params.outcome == out,
                             onClick = {
+                                currentPage = 0
                                 onUpdateReportFilter {
                                     it.copy(outcome = if (it.outcome == out) null else out)
                                 }
@@ -369,13 +402,17 @@ fun ReportsScreen(
                     }
                     FilterChip(
                         selected = params.cadence == null,
-                        onClick = { onUpdateReportFilter { it.copy(cadence = null) } },
+                        onClick = {
+                            currentPage = 0
+                            onUpdateReportFilter { it.copy(cadence = null) }
+                        },
                         label = { Text("All Cadences") }
                     )
                     Cadence.entries.forEach { cad ->
                         FilterChip(
                             selected = params.cadence == cad,
                             onClick = {
+                                currentPage = 0
                                 onUpdateReportFilter {
                                     it.copy(cadence = if (it.cadence == cad) null else cad)
                                 }
@@ -396,12 +433,30 @@ fun ReportsScreen(
                 )
             }
         } else {
-            items(dataset.logs, key = { "log_${it.log.id}" }) { item ->
+            items(pagedLogs.items, key = { "log_${it.log.id}" }) { item ->
                 val machine = machinesById[item.log.machineId]
                 ServiceHistoryReportCard(
                     item = item,
                     machine = machine,
                     onDelete = { onDeleteLog(item.log.id) }
+                )
+            }
+
+            item(key = "reports_pagination_footer") {
+                ListPaginationFooter(
+                    startNumber = pagedLogs.startNumber,
+                    endNumber = pagedLogs.endNumber,
+                    totalItems = pagedLogs.totalItems,
+                    safePageIndex = pagedLogs.safePageIndex,
+                    totalPages = pagedLogs.totalPages,
+                    pageSize = pageSize,
+                    onPageSizeChange = { newSize ->
+                        currentPage = 0
+                        onSetListPageSize(newSize)
+                    },
+                    onPrevPage = { currentPage = (pagedLogs.safePageIndex - 1).coerceAtLeast(0) },
+                    onNextPage = { currentPage = (pagedLogs.safePageIndex + 1).coerceAtMost(pagedLogs.totalPages - 1) },
+                    testTagPrefix = "reports"
                 )
             }
         }

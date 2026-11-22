@@ -5,7 +5,7 @@
     <string name="nav_warehouse">Parts</string>
     <string name="nav_engineers">Engineers</string>
     <string name="nav_reports">Reports</string>
-    <string name="action_sync_backup">Sync &amp; Settings</string>
+    <string name="action_sync_backup">Settings</string>
     <string name="action_pc_web">PC Web Access</string>
     <string name="action_export_report">Export Report</string>
     <string name="action_add_task">New Task</string>
@@ -16,6 +16,8 @@
     <string name="action_manage_groups">Manage Groups</string>
     <string name="notification_channel_reminders_name">Task &amp; To-Do Reminders</string>
     <string name="notification_channel_reminders_desc">Alerts for upcoming and overdue machine tasks and engineer to-do reminders.</string>
+    <string name="notification_channel_new_tasks_name">New Task Alerts</string>
+    <string name="notification_channel_new_tasks_desc">Instant alerts when a new maintenance task is created on phone, PC, or Excel import.</string>
     <string name="notification_channel_backup_name">Automatic Backups</string>
     <string name="notification_channel_backup_desc">Status updates for scheduled offline backup file generation.</string>
 </resources>

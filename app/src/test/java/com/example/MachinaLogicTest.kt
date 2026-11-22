@@ -31,6 +31,7 @@ import com.example.engine.AppUpdateChecker
 import com.example.engine.Formatters
 import com.example.ui.HistoryFilterState
 import com.example.ui.TodoFilterState
+import com.example.ui.countApproachingOrOverdueTasks
 import com.example.ui.screens.TodoFeedItem
 import com.example.ui.screens.buildTodoFeedItems
 import com.example.ui.screens.filterAndSortHistoryLogs
@@ -781,5 +782,54 @@ class MachinaLogicTest {
         assertEquals(4, history[0].usedPart.quantity)
         assertEquals("MCH-10", history[1].machine?.assetCode)
         assertEquals(2, history[1].usedPart.quantity)
+    }
+
+    @Test
+    fun `countApproachingOrOverdueTasks counts overdue, 24h approaching, and reminder lead tasks`() {
+        val now = 1_700_000_000_000L
+        val hour = 3_600_000L
+
+        val overdue = MaintenanceTaskEntity(
+            id = 1L,
+            machineId = 1L,
+            title = "Overdue Valve Check",
+            cadence = Cadence.DAILY,
+            deadlineMillis = now - 2 * hour,
+            personInCharge = "Elena Vance"
+        )
+        val within24h = MaintenanceTaskEntity(
+            id = 2L,
+            machineId = 1L,
+            title = "Approaching within 24h",
+            cadence = Cadence.WEEKLY,
+            deadlineMillis = now + 6 * hour,
+            personInCharge = "Elena Vance"
+        )
+        val withinReminderLead = MaintenanceTaskEntity(
+            id = 3L,
+            machineId = 1L,
+            title = "Approaching via 48h reminder lead",
+            cadence = Cadence.MONTHLY,
+            deadlineMillis = now + 36 * hour,
+            personInCharge = "Marcus Chen",
+            reminderEnabled = true,
+            reminderLeadHours = 48
+        )
+        val distantWithoutTrigger = MaintenanceTaskEntity(
+            id = 4L,
+            machineId = 1L,
+            title = "Distant Task",
+            cadence = Cadence.MONTHLY,
+            deadlineMillis = now + 72 * hour,
+            personInCharge = "Marcus Chen",
+            reminderEnabled = true,
+            reminderLeadHours = 24
+        )
+
+        val count = countApproachingOrOverdueTasks(
+            tasks = listOf(overdue, within24h, withinReminderLead, distantWithoutTrigger),
+            nowMillis = now
+        )
+        assertEquals(3, count)
     }
 }

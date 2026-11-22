@@ -1,5 +1,8 @@
 package com.example
 
+import android.Manifest
+import android.app.Application
+import android.app.NotificationManager
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -16,6 +19,7 @@ import com.example.data.Severity
 import com.example.data.TaskOutcome
 import com.example.data.TodoReminderEntity
 import com.example.engine.AppUpdateChecker
+import com.example.engine.NotificationChannels
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -23,6 +27,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
@@ -180,5 +185,88 @@ class ExampleRobolectricTest {
         } finally {
             db.close()
         }
+    }
+
+    @Test
+    fun `notifyNewTaskCreated creates new tasks channel and posts alert notification`() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        Shadows.shadowOf(app).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+
+        NotificationChannels.notifyNewTaskCreated(
+            context = app,
+            title = "Hydraulic Pressure Calibration",
+            machineLabel = "MCH-10 · CNC Lathe",
+            personInCharge = "Elena Vance",
+            deadlineMillis = System.currentTimeMillis() + 7_200_000L
+        )
+
+        val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val channel = nm.getNotificationChannel(NotificationChannels.CHANNEL_NEW_TASKS)
+        assertNotNull(channel)
+
+        val posted = Shadows.shadowOf(nm).allNotifications
+        assertTrue(posted.isNotEmpty())
+        val latest = posted.last()
+        assertEquals(NotificationChannels.CHANNEL_NEW_TASKS, latest.channelId)
+        val notifTitle = latest.extras.getCharSequence("android.title")?.toString().orEmpty()
+        assertTrue(notifTitle.contains("Hydraulic Pressure Calibration"))
+    }
+
+    @Test
+    fun `parseReleasesArrayJson skips drafts, supports prereleases, and picks highest version`() {
+        val json = """
+            [
+              {
+                "tag_name": "v2.0.0-draft",
+                "name": "Draft Release",
+                "draft": true,
+                "prerelease": false,
+                "html_url": "https://github.com/Lock001111/MachLog/releases/tag/v2.0.0-draft",
+                "assets": [
+                  {
+                    "name": "MachinaLog-draft.apk",
+                    "browser_download_url": "https://example.com/draft.apk"
+                  }
+                ]
+              },
+              {
+                "tag_name": "v1.0.2",
+                "name": "Stable 1.0.2",
+                "draft": false,
+                "prerelease": false,
+                "html_url": "https://github.com/Lock001111/MachLog/releases/tag/v1.0.2",
+                "assets": [
+                  {
+                    "name": "MachinaLog-v1.0.2.apk",
+                    "browser_download_url": "https://example.com/1.0.2.apk"
+                  }
+                ]
+              },
+              {
+                "tag_name": "release-1.3.0-beta",
+                "name": "Release 1.3.0 Beta",
+                "draft": false,
+                "prerelease": true,
+                "html_url": "https://github.com/Lock001111/MachLog/releases/tag/release-1.3.0-beta",
+                "assets": [
+                  {
+                    "name": "MachinaLog-v1.3.0-beta.apk",
+                    "browser_download_url": "https://example.com/1.3.0-beta.apk"
+                  }
+                ]
+              }
+            ]
+        """.trimIndent()
+
+        val best = AppUpdateChecker.parseReleasesArrayJson(
+            json = json,
+            currentVersionName = "1.0",
+            currentVersionCode = 1
+        )
+        assertNotNull(best)
+        assertEquals("release-1.3.0-beta", best!!.latestTag)
+        assertTrue(best.isPreRelease)
+        assertTrue(best.isUpdateAvailable)
+        assertEquals("https://example.com/1.3.0-beta.apk", best.apkDownloadUrl)
     }
 }

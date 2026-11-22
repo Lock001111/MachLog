@@ -2,11 +2,14 @@ package com.example.ui.components
 
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -25,6 +29,9 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.WarningAmber
@@ -46,6 +53,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -615,3 +623,171 @@ fun CompactSearchField(
         }
     }
 }
+
+@Composable
+fun CollapsibleFilterPanel(
+    activeFilterCount: Int,
+    onResetFilters: () -> Unit,
+    testTagPrefix: String,
+    modifier: Modifier = Modifier,
+    inlineQuickActions: (@Composable () -> Unit)? = null,
+    filterContent: @Composable ColumnScope.() -> Unit
+) {
+    var expanded by rememberSaveable(testTagPrefix) { mutableStateOf(false) }
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+        ) {
+            FilterChip(
+                selected = expanded || activeFilterCount > 0,
+                onClick = { expanded = !expanded },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Filled.FilterList,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                },
+                trailingIcon = {
+                    Icon(
+                        imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                        contentDescription = if (expanded) "Hide filters" else "Show filters",
+                        modifier = Modifier.size(16.dp)
+                    )
+                },
+                label = {
+                    Text(
+                        text = if (activeFilterCount > 0) "Filters ($activeFilterCount)" else "Filters",
+                        maxLines = 1
+                    )
+                },
+                modifier = Modifier.testTag("${testTagPrefix}_filters_toggle_chip")
+            )
+            inlineQuickActions?.invoke()
+            if (activeFilterCount > 0) {
+                TextButton(
+                    onClick = onResetFilters,
+                    modifier = Modifier
+                        .minimumInteractiveComponentSize()
+                        .testTag("${testTagPrefix}_filters_reset_button")
+                ) {
+                    Text("Reset")
+                }
+            }
+        }
+
+        AnimatedVisibility(visible = expanded) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(10.dp),
+                    content = filterContent
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ListPaginationFooter(
+    startNumber: Int,
+    endNumber: Int,
+    totalItems: Int,
+    safePageIndex: Int,
+    totalPages: Int,
+    pageSize: Int,
+    onPageSizeChange: (Int) -> Unit,
+    onPrevPage: () -> Unit,
+    onNextPage: () -> Unit,
+    testTagPrefix: String,
+    modifier: Modifier = Modifier
+) {
+    if (totalItems == 0) return
+
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "Showing $startNumber–$endNumber of $totalItems",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Per page:",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    listOf(25, 50, 100).forEach { sizeOption ->
+                        FilterChip(
+                            selected = pageSize == sizeOption,
+                            onClick = { onPageSizeChange(sizeOption) },
+                            label = { Text("$sizeOption") },
+                            modifier = Modifier.testTag("${testTagPrefix}_page_size_$sizeOption")
+                        )
+                    }
+                }
+            }
+
+            if (totalPages > 1) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    OutlinedButton(
+                        onClick = onPrevPage,
+                        enabled = safePageIndex > 0,
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("${testTagPrefix}_prev_page_button")
+                    ) {
+                        Text("Prev")
+                    }
+                    Text(
+                        text = "Page ${safePageIndex + 1} of $totalPages",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    OutlinedButton(
+                        onClick = onNextPage,
+                        enabled = safePageIndex < totalPages - 1,
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("${testTagPrefix}_next_page_button")
+                    ) {
+                        Text("Next")
+                    }
+                }
+            }
+        }
+    }
+}
+
