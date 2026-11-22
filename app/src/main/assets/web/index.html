@@ -258,10 +258,16 @@ const appState = {
   taskSubTab: 'active',
   pin: localStorage.getItem('machina_pin') || '',
   taskCadence: 'ALL',
+  taskPriority: 'ALL',
+  taskPic: 'ALL',
+  taskGroupId: 'ALL',
+  taskSort: 'ASC',
   taskOverdueOnly: false,
   taskSearch: '',
   todoRepeat: 'ALL',
   todoShowDone: false,
+  todoPageSize: 25,
+  todoPage: 0,
   historyOutcome: 'ALL',
   historySearch: '',
   machineStatus: 'ALL',
@@ -270,7 +276,9 @@ const appState = {
   partSearch: '',
   engineerSearch: '',
   reportFilter: { machineId: '', groupId: '', pic: '', cadence: '', outcome: '', start: '', end: '' },
-  draftParts: []
+  draftParts: [],
+  updateStatusText: '',
+  latestReleaseInfo: null
 };
 
 function esc(str) {
@@ -431,6 +439,13 @@ function outcomePillHtml(outcome) {
   return `<span class="pill pill-ok">DONE</span>`;
 }
 
+function priorityPillHtml(priority) {
+  const p = String(priority || 'NORMAL').toUpperCase();
+  if (p === 'URGENT') return `<span class="pill pill-danger">URGENT</span>`;
+  if (p === 'HIGH') return `<span class="pill pill-warn">HIGH</span>`;
+  return `<span class="pill">NORMAL</span>`;
+}
+
 function buildEngineerSelectHtml(idAttr, engineers, preferredName, onchangeAttr = '') {
   if (!engineers || engineers.length === 0) {
     return `<select id="${idAttr}" ${onchangeAttr}><option value="">No registered engineers — add one in Engineers tab</option></select>`;
@@ -507,23 +522,50 @@ function renderTasks(root, d) {
   const gMap = byIdMap(d.groups);
   const now = Date.now();
   const q = appState.taskSearch.trim().toLowerCase();
+  const picNames = [...new Set((d.engineers || []).map(e => e.name).concat(d.tasks.map(t => t.personInCharge)).filter(Boolean))].sort();
   const filtered = d.tasks.filter(t => {
     const m = mMap[t.machineId];
+    const effGroupId = t.groupId || m?.groupId || null;
     if (appState.taskCadence !== 'ALL' && t.cadence !== appState.taskCadence) return false;
+    if (appState.taskPriority !== 'ALL' && (t.priority || 'NORMAL') !== appState.taskPriority) return false;
+    if (appState.taskGroupId !== 'ALL' && String(effGroupId || '') !== String(appState.taskGroupId)) return false;
+    if (appState.taskPic !== 'ALL') {
+      const picLower = appState.taskPic.toLowerCase();
+      const isPic = (t.personInCharge || '').toLowerCase() === picLower;
+      const isAst = parseEngineerList(t.assistantEngineers).some(a => a.toLowerCase() === picLower);
+      if (!isPic && !isAst) return false;
+    }
     if (appState.taskOverdueOnly && t.deadlineMillis >= now) return false;
     if (q) {
-      const hay = `${t.title} ${t.description} ${t.personInCharge} ${t.assistantEngineers || ''} ${m?.assetCode || ''} ${m?.name || ''}`.toLowerCase();
+      const hay = `${t.title} ${t.description} ${t.priority || 'NORMAL'} ${t.personInCharge} ${t.assistantEngineers || ''} ${m?.assetCode || ''} ${m?.name || ''}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
-  });
+  }).sort((a, b) => appState.taskSort === 'DESC' ? (b.deadlineMillis - a.deadlineMillis) : (a.deadlineMillis - b.deadlineMillis));
 
   root.innerHTML = `
     <div class="card">
       ${subtabsHtml}
-      <div class="between">
+      <div class="between" style="gap:8px;">
         <div class="row" style="flex:1; min-width:240px;">
-          <input style="max-width:320px;" placeholder="Search tasks, machine, PIC, assistants..." value="${esc(appState.taskSearch)}" oninput="appState.taskSearch=this.value; renderTab()" />
+          <input style="max-width:260px;" placeholder="Search tasks, machine, PIC..." value="${esc(appState.taskSearch)}" oninput="appState.taskSearch=this.value; renderTab()" />
+          <select style="width:auto;" onchange="appState.taskPriority=this.value; renderTab()">
+            <option value="ALL" ${appState.taskPriority==='ALL'?'selected':''}>All Priorities</option>
+            <option value="URGENT" ${appState.taskPriority==='URGENT'?'selected':''}>URGENT</option>
+            <option value="HIGH" ${appState.taskPriority==='HIGH'?'selected':''}>HIGH</option>
+            <option value="NORMAL" ${appState.taskPriority==='NORMAL'?'selected':''}>NORMAL</option>
+          </select>
+          <select style="width:auto;" onchange="appState.taskPic=this.value; renderTab()">
+            <option value="ALL" ${appState.taskPic==='ALL'?'selected':''}>All Engineers</option>
+            ${picNames.map(p => `<option value="${esc(p)}" ${appState.taskPic===p?'selected':''}>${esc(p)}</option>`).join('')}
+          </select>
+          <select style="width:auto;" onchange="appState.taskGroupId=this.value; renderTab()">
+            <option value="ALL" ${appState.taskGroupId==='ALL'?'selected':''}>All Groups</option>
+            ${d.groups.map(g => `<option value="${g.id}" ${String(appState.taskGroupId)===String(g.id)?'selected':''}>${esc(g.name)}</option>`).join('')}
+          </select>
+          <button class="btn-sm" onclick="appState.taskSort = appState.taskSort==='ASC'?'DESC':'ASC'; renderTab()">
+            ${appState.taskSort === 'ASC' ? 'Date ↑ Soonest' : 'Date ↓ Latest'}
+          </button>
           <label style="display:inline-flex;align-items:center;gap:6px;margin:0;cursor:pointer;">
             <input type="checkbox" style="width:auto;" ${appState.taskOverdueOnly ? 'checked' : ''} onchange="appState.taskOverdueOnly=this.checked; renderTab()" />
             Overdue Only
@@ -538,7 +580,7 @@ function renderTasks(root, d) {
         ${['ALL','ONCE','DAILY','WEEKLY','MONTHLY','YEARLY'].map(c => `<button class="chip ${appState.taskCadence===c?'active':''}" onclick="appState.taskCadence='${c}'; renderTab()">${c}</button>`).join('')}
       </div>
       <table>
-        <thead><tr><th>Cadence / Group</th><th>Machine</th><th>Task</th><th>Deadline &amp; Reminder</th><th>Engineers</th><th>Est.</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Priority &amp; Cadence</th><th>Machine</th><th>Task</th><th>Deadline &amp; Reminder</th><th>Engineers</th><th>Est.</th><th>Actions</th></tr></thead>
         <tbody>
           ${filtered.length === 0 ? `<tr><td colspan="7" class="muted">No active tasks match the current filter.</td></tr>` :
             filtered.map(t => {
@@ -546,7 +588,14 @@ function renderTasks(root, d) {
               const g = gMap[t.groupId || m?.groupId];
               const overdue = t.deadlineMillis < now;
               return `<tr>
-                <td><span class="pill pill-primary">${esc(t.cadence)}</span>${t.cadence!=='ONCE' ? `<div class="muted" style="margin-top:3px;">Auto-repeats</div>`:''}${g ? `<div class="muted" style="margin-top:4px;">${esc(g.name)}</div>` : ''}</td>
+                <td>
+                  <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                    ${priorityPillHtml(t.priority)}
+                    <span class="pill pill-primary">${esc(t.cadence)}</span>
+                  </div>
+                  ${t.cadence!=='ONCE' ? `<div class="muted" style="margin-top:3px;">Auto-repeats</div>`:''}
+                  ${g ? `<div class="muted" style="margin-top:4px;">${esc(g.name)}</div>` : ''}
+                </td>
                 <td><strong>${esc(m?.assetCode || '-')}</strong><div class="muted">${esc(m?.name || '')}</div></td>
                 <td><strong>${esc(t.title)}</strong><div class="muted">${esc(t.description)}</div></td>
                 <td>
@@ -576,38 +625,66 @@ function renderTasks(root, d) {
 
 function renderTodoSubTabHtml(d) {
   const mMap = byIdMap(d.machines);
+  const completedCount = d.todos.filter(td => td.isCompleted).length;
   const filtered = d.todos.filter(td => {
     if (!appState.todoShowDone && td.isCompleted) return false;
     if (appState.todoRepeat !== 'ALL' && td.repeatRule !== appState.todoRepeat) return false;
     return true;
+  }).sort((a, b) => {
+    if (a.isCompleted !== b.isCompleted) return a.isCompleted ? 1 : -1;
+    if (!a.isCompleted) return a.dueAtMillis - b.dueAtMillis;
+    return (b.completedAtMillis || b.dueAtMillis) - (a.completedAtMillis || a.dueAtMillis);
   });
+
+  const pageSize = [25, 50, 100].includes(appState.todoPageSize) ? appState.todoPageSize : 25;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.max(0, Math.min(appState.todoPage, totalPages - 1));
+  appState.todoPage = safePage;
+  const startIdx = safePage * pageSize;
+  const paged = filtered.slice(startIdx, startIdx + pageSize);
+
   return `
     <div class="between">
       <div class="row">
         <label style="display:inline-flex;align-items:center;gap:6px;margin:0;cursor:pointer;">
-          <input type="checkbox" style="width:auto;" ${appState.todoShowDone?'checked':''} onchange="appState.todoShowDone=this.checked; renderTab()" /> Show Completed
+          <input type="checkbox" style="width:auto;" ${appState.todoShowDone?'checked':''} onchange="appState.todoShowDone=this.checked; appState.todoPage=0; renderTab()" /> Show Completed (${completedCount})
+        </label>
+        <label style="display:inline-flex;align-items:center;gap:6px;margin:0;">
+          <span>Per page:</span>
+          <select style="width:auto;" onchange="appState.todoPageSize=Number(this.value); appState.todoPage=0; renderTab()">
+            ${[25, 50, 100].map(sz => `<option value="${sz}" ${pageSize===sz?'selected':''}>${sz}</option>`).join('')}
+          </select>
         </label>
       </div>
       <button class="btn-primary" onclick="openTodoModal()">+ New Reminder</button>
     </div>
     <div class="chip-row">
-      ${['ALL','ONCE','DAILY','WEEKLY','MONTHLY','YEARLY'].map(r => `<button class="chip ${appState.todoRepeat===r?'active':''}" onclick="appState.todoRepeat='${r}'; renderTab()">${r}</button>`).join('')}
+      ${['ALL','ONCE','DAILY','WEEKLY','MONTHLY','YEARLY'].map(r => `<button class="chip ${appState.todoRepeat===r?'active':''}" onclick="appState.todoRepeat='${r}'; appState.todoPage=0; renderTab()">${r}</button>`).join('')}
     </div>
     <table>
-      <thead><tr><th>Done</th><th>Title</th><th>Repeat</th><th>Priority</th><th>Trigger Date</th><th>PIC</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Done</th><th>Title</th><th>Repeat</th><th>Priority</th><th>Trigger / Completed</th><th>PIC</th><th>Actions</th></tr></thead>
       <tbody>
-        ${filtered.length === 0 ? `<tr><td colspan="7" class="muted">No reminders found.</td></tr>` :
-          filtered.map(td => `<tr>
+        ${paged.length === 0 ? `<tr><td colspan="7" class="muted">No reminders found.</td></tr>` :
+          paged.map(td => `<tr>
             <td><input type="checkbox" style="width:auto;" ${td.isCompleted?'checked':''} onchange="toggleTodo(${td.id})" /></td>
             <td><strong>${esc(td.title)}</strong><div class="muted">${esc(td.notes)} ${td.machineId && mMap[td.machineId] ? '· ' + esc(mMap[td.machineId].assetCode) : ''}</div></td>
             <td><span class="pill pill-primary">${esc(td.repeatRule)}</span></td>
-            <td><span class="pill ${td.priority==='URGENT'?'pill-danger':td.priority==='HIGH'?'pill-warn':''}">${esc(td.priority)}</span></td>
-            <td>${fmtDate(td.dueAtMillis)}</td>
+            <td>${priorityPillHtml(td.priority)}</td>
+            <td>${td.isCompleted && td.completedAtMillis ? `<span class="pill pill-ok">Done ${fmtDate(td.completedAtMillis)}</span>` : fmtDate(td.dueAtMillis)}</td>
             <td>${esc(td.personInCharge)}</td>
             <td><div class="row"><button class="btn-sm" onclick="openTodoModal(${td.id})">Edit</button><button class="btn-sm btn-danger" onclick="deleteTodo(${td.id})">Del</button></div></td>
           </tr>`).join('')}
       </tbody>
-    </table>`;
+    </table>
+    ${filtered.length > 0 ? `
+      <div class="between" style="margin-top:10px;">
+        <span class="muted">Showing ${startIdx + 1}–${Math.min(startIdx + pageSize, filtered.length)} of ${filtered.length}</span>
+        <div class="row">
+          <button class="btn-sm" ${safePage <= 0 ? 'disabled' : ''} onclick="appState.todoPage=Math.max(0, appState.todoPage - 1); renderTab()">&lt; Prev</button>
+          <span class="muted">Page ${safePage + 1} of ${totalPages}</span>
+          <button class="btn-sm" ${safePage >= totalPages - 1 ? 'disabled' : ''} onclick="appState.todoPage=Math.min(${totalPages - 1}, appState.todoPage + 1); renderTab()">Next &gt;</button>
+        </div>
+      </div>` : ''}`;
 }
 
 function renderHistorySubTabHtml(d) {
@@ -674,6 +751,7 @@ function openTaskModal(id = null, defaultMachineIdArg = null) {
   const engineers = d.engineers || [];
   const defaultMachineId = t ? t.machineId : (defaultMachineIdArg || d.machines[0]?.id || 0);
   const selectedCadence = t?.cadence || 'ONCE';
+  const selectedPriority = t?.priority || 'NORMAL';
   const rawLead = t?.reminderLeadHours ?? 24;
   const useDays = rawLead >= 24 && rawLead % 24 === 0;
   const leadNum = useDays ? (rawLead / 24) : rawLead;
@@ -693,8 +771,12 @@ function openTaskModal(id = null, defaultMachineIdArg = null) {
         <select id="t-cadence">${['ONCE','DAILY','WEEKLY','MONTHLY','YEARLY'].map(c => `<option value="${c}" ${selectedCadence===c?'selected':''}>${c === 'ONCE' ? 'ONCE (One-Time)' : c}</option>`).join('')}</select>
         <div class="muted" style="margin-top:3px;">Repeatable tasks auto-recreate with their reminder when completed.</div>
       </div>
-      <div><label>Deadline</label><input id="t-deadline" type="datetime-local" value="${toInputDateTime(t?.deadlineMillis || (Date.now() + 8*3600*1000))}" /></div>
+      <div>
+        <label>Priority</label>
+        <select id="t-priority">${['NORMAL','HIGH','URGENT'].map(p => `<option value="${p}" ${selectedPriority===p?'selected':''}>${p}</option>`).join('')}</select>
+      </div>
     </div>
+    <div><label>Deadline</label><input id="t-deadline" type="datetime-local" value="${toInputDateTime(t?.deadlineMillis || (Date.now() + 8*3600*1000))}" /></div>
     <div style="border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--surface-alt);">
       <div class="between" style="margin-bottom:6px;">
         <strong>Deadline Reminder</strong>
@@ -737,6 +819,7 @@ async function saveTask(id) {
     title,
     description: document.getElementById('t-desc').value,
     cadence: document.getElementById('t-cadence').value,
+    priority: document.getElementById('t-priority').value,
     deadlineMillis: dlStr ? new Date(dlStr).getTime() : Date.now(),
     estimatedMinutes: Number(document.getElementById('t-est').value) || 30,
     personInCharge: pic,
@@ -778,8 +861,8 @@ function renderDraftPartsBlock() {
             </div>
           `).join('')}
       </div>
-      <label style="margin-top:6px;">Search Warehouse Spare Parts (by Part ID/Code or Description)</label>
-      <input id="picker-query" placeholder="Type code or description (e.g. HF-40, bearing, 24V)..." oninput="renderPickerResults()" />
+      <label style="margin-top:6px;">Search Warehouse Spare Parts (type at least 3 characters)</label>
+      <input id="picker-query" placeholder="Type >= 3 letters (e.g. HF-, brg, bearing, 24V)..." oninput="renderPickerResults()" />
       <div class="picker-list" id="picker-results" style="margin-top:6px;"></div>
     </div>`;
 }
@@ -787,10 +870,13 @@ function renderDraftPartsBlock() {
 function renderPickerResults() {
   const el = document.getElementById('picker-results');
   if (!el) return;
-  const q = (document.getElementById('picker-query')?.value || '').trim().toLowerCase();
-  const tokens = q.split(/\s+/).filter(Boolean);
+  const rawQuery = (document.getElementById('picker-query')?.value || '').trim();
+  if (rawQuery.length < 3) {
+    el.innerHTML = `<div class="muted" style="padding:10px;">Type at least 3 characters (Part ID/code or description) to search warehouse spare parts.</div>`;
+    return;
+  }
+  const tokens = rawQuery.toLowerCase().split(/\s+/).filter(Boolean);
   const parts = appState.data.warehouseParts.filter(w => {
-    if (tokens.length === 0) return true;
     const hay = `${w.partCode} ${w.partName} ${w.partDescription}`.toLowerCase();
     return tokens.every(t => hay.includes(t));
   });
@@ -1196,7 +1282,7 @@ function renderEngineers(root, d) {
                 <td>${e.employeeCode ? `<span class="pill pill-primary">${esc(e.employeeCode)}</span>` : '-'}</td>
                 <td>${esc(e.role)}</td>
                 <td><span class="pill">${esc(e.shift)}</span></td>
-                <td>${activeCount}</td>
+                <td><button class="btn-sm" onclick="openEngineerTasksModal(${e.id})">${activeCount} Active &rarr;</button></td>
                 <td>${histCount}</td>
                 <td><div class="row"><button class="btn-sm" onclick="openEngineerModal(${e.id})">Edit</button><button class="btn-sm btn-danger" onclick="deleteEngineer(${e.id})">Del</button></div></td>
               </tr>`;
@@ -1204,6 +1290,60 @@ function renderEngineers(root, d) {
         </tbody>
       </table>
     </div>`;
+}
+
+function openEngineerTasksModal(engineerId) {
+  const d = appState.data;
+  const eng = (d.engineers || []).find(e => e.id === engineerId);
+  if (!eng) return;
+  const mMap = byIdMap(d.machines);
+  const lower = eng.name.toLowerCase();
+  const assigned = d.tasks.filter(t =>
+    t.personInCharge.toLowerCase() === lower ||
+    parseEngineerList(t.assistantEngineers).some(a => a.toLowerCase() === lower)
+  ).sort((a, b) => a.deadlineMillis - b.deadlineMillis);
+
+  const listHtml = assigned.length === 0
+    ? `<div class="muted">No active tasks currently assigned to ${esc(eng.name)}.</div>`
+    : assigned.map(t => {
+        const m = mMap[t.machineId];
+        const isPic = t.personInCharge.toLowerCase() === lower;
+        return `
+          <div style="border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--surface-alt);">
+            <div class="between">
+              <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;">
+                ${priorityPillHtml(t.priority)}
+                <span class="pill pill-primary">${esc(t.cadence)}</span>
+                <span class="pill pill-ok">${isPic ? 'PIC' : 'Assistant'}</span>
+              </div>
+              <span class="muted">${fmtDate(t.deadlineMillis)}</span>
+            </div>
+            <div style="font-weight:700;margin-top:5px;">${esc(t.title)}</div>
+            <div class="muted">${esc(m?.assetCode || '-')} · ${esc(m?.name || '')}</div>
+            <div class="row" style="margin-top:8px;justify-content:flex-end;">
+              <button class="btn-sm" onclick="closeModal(); openTaskModal(${t.id})">Edit</button>
+              <button class="btn-sm btn-danger" onclick="closeModal(); openRejectTaskModal(${t.id})">Reject</button>
+              <button class="btn-primary btn-sm" onclick="closeModal(); openCompleteTaskModal(${t.id})">Complete</button>
+            </div>
+          </div>`;
+      }).join('');
+
+  openModal(
+    `${eng.name} — Active Tasks (${assigned.length})`,
+    `<div class="muted">${esc(eng.role)} · ${esc(eng.shift)}</div>${listHtml}`,
+    assigned.length > 0
+      ? `<button class="btn-primary" onclick="filterTasksByEngineer(${eng.id})">Filter in Tasks Tab</button>`
+      : ''
+  );
+}
+
+function filterTasksByEngineer(engineerId) {
+  const eng = (appState.data.engineers || []).find(e => e.id === engineerId);
+  if (!eng) return;
+  closeModal();
+  appState.taskPic = eng.name;
+  appState.taskSubTab = 'active';
+  switchTab('tasks');
 }
 
 function openEngineerModal(id = null) {
@@ -1302,7 +1442,78 @@ function renderReports(root, d) {
       <div class="row">
         ${d.groups.map(g => `<span class="pill pill-primary" style="padding:6px 10px;">${esc(g.name)} (${esc(g.scope)}) <button style="border:none;background:transparent;padding:0 0 0 6px;color:var(--danger);" onclick="deleteGroup(${g.id})">×</button></span>`).join('') || `<span class="muted">No custom groups created yet.</span>`}
       </div>
+    </div>
+
+    <div class="card">
+      <div class="between">
+        <div>
+          <strong>App Updates &amp; GitHub Releases (${esc(d.githubRepo || 'Lock001111/MachLog')})</strong>
+          <div class="muted">Installed APK Version: v${esc(d.appVersionName || '1.0')} (Build ${esc(d.appVersionCode || 1)})</div>
+          ${appState.updateStatusText ? `<div style="font-size:12px;margin-top:4px;color:var(--primary);">${esc(appState.updateStatusText)}</div>` : ''}
+          ${appState.latestReleaseInfo?.isUpdateAvailable ? `
+            <div style="margin-top:6px;">
+              <a class="btn btn-primary btn-sm" style="text-decoration:none;display:inline-block;" href="${esc(appState.latestReleaseInfo.apkUrl || appState.latestReleaseInfo.htmlUrl)}" target="_blank" rel="noopener">
+                Download ${esc(appState.latestReleaseInfo.tagName)} APK
+              </a>
+            </div>` : ''}
+        </div>
+        <button class="btn-sm" onclick="checkGithubReleaseWeb()">Check GitHub Releases</button>
+      </div>
     </div>`;
+}
+
+function parseVersionPartsWeb(raw) {
+  const cleaned = String(raw || '').trim().replace(/^[vV]/, '').split('-')[0].split('+')[0];
+  return cleaned.split('.').map(p => parseInt(p, 10)).filter(n => !Number.isNaN(n));
+}
+
+function isRemoteVersionNewerWeb(remoteTag, currentVersion) {
+  const r = parseVersionPartsWeb(remoteTag);
+  const c = parseVersionPartsWeb(currentVersion);
+  const len = Math.max(r.length, c.length);
+  if (!len) return false;
+  for (let i = 0; i < len; i++) {
+    const rv = r[i] || 0;
+    const cv = c[i] || 0;
+    if (rv > cv) return true;
+    if (rv < cv) return false;
+  }
+  return false;
+}
+
+async function checkGithubReleaseWeb() {
+  const repo = appState.data?.githubRepo || 'Lock001111/MachLog';
+  const curVer = appState.data?.appVersionName || '1.0';
+  appState.updateStatusText = 'Checking GitHub Releases...';
+  renderTab();
+  try {
+    const resp = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+      headers: { 'Accept': 'application/vnd.github+json' }
+    });
+    if (resp.status === 404) {
+      appState.latestReleaseInfo = null;
+      appState.updateStatusText = `No GitHub Releases published yet on ${repo}.`;
+      renderTab();
+      return;
+    }
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const rel = await resp.json();
+    const tag = rel.tag_name || '';
+    const apkAsset = (rel.assets || []).find(a => String(a.name || '').toLowerCase().endsWith('.apk') && a.browser_download_url);
+    const newer = isRemoteVersionNewerWeb(tag, curVer);
+    appState.latestReleaseInfo = {
+      tagName: tag,
+      htmlUrl: rel.html_url || `https://github.com/${repo}/releases`,
+      apkUrl: apkAsset ? apkAsset.browser_download_url : null,
+      isUpdateAvailable: newer
+    };
+    appState.updateStatusText = newer
+      ? `New release available: ${tag} (installed v${curVer})`
+      : `Up to date: installed v${curVer} matches latest ${tag}`;
+  } catch (e) {
+    appState.updateStatusText = 'Update check failed: ' + e.message;
+  }
+  renderTab();
 }
 
 function buildReportQuery() {

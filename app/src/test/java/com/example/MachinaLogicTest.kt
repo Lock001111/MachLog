@@ -22,13 +22,17 @@ import com.example.engine.LocalWebServerManager
 import com.example.engine.PortableBackupPackage
 import com.example.engine.ReportExportEngine
 import com.example.data.MachineStatus
+import com.example.data.ReminderPriority
 import com.example.data.TaskOutcome
 import com.example.data.formatEngineerList
 import com.example.data.parseEngineerList
+import com.example.engine.AppUpdateChecker
 import com.example.engine.Formatters
 import com.example.ui.screens.filterWarehouseParts
+import com.example.ui.screens.paginateItems
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -476,5 +480,105 @@ class MachinaLogicTest {
         assertEquals("REJECTED", parsed?.serviceLogs?.firstOrNull()?.outcome)
         assertEquals("Safety lockout active", parsed?.serviceLogs?.firstOrNull()?.rejectionReason)
         assertEquals("Marcus Chen", parsed?.serviceLogs?.firstOrNull()?.assistantEngineers)
+    }
+
+    @Test
+    fun `app update version comparator detects newer tags accurately`() {
+        assertTrue(AppUpdateChecker.isRemoteVersionNewer("v1.0.1", "1.0", 1))
+        assertTrue(AppUpdateChecker.isRemoteVersionNewer("v1.2.0", "1.0", 1))
+        assertTrue(AppUpdateChecker.isRemoteVersionNewer("2.0", "1.9.9", 10))
+        assertFalse(AppUpdateChecker.isRemoteVersionNewer("v1.0", "1.0", 1))
+        assertFalse(AppUpdateChecker.isRemoteVersionNewer("v1.0.0", "1.0", 1))
+        assertFalse(AppUpdateChecker.isRemoteVersionNewer("v0.9.5", "1.0", 1))
+    }
+
+    @Test
+    fun `warehouse search picker enforces 3 character minimum threshold`() {
+        val parts = listOf(
+            WarehousePartEntity(id = 1L, partCode = "BRG-6205-2RS", partName = "Deep Groove Bearing", partDescription = "SKF 25x52x15mm conveyor bearing"),
+            WarehousePartEntity(id = 2L, partCode = "HF-40-10UM", partName = "Hydraulic Return Filter", partDescription = "10-micron return tank filter")
+        )
+        assertTrue(filterWarehouseParts(parts, "", minQueryLength = 3).isEmpty())
+        assertTrue(filterWarehouseParts(parts, "b", minQueryLength = 3).isEmpty())
+        assertTrue(filterWarehouseParts(parts, "br", minQueryLength = 3).isEmpty())
+
+        val matched = filterWarehouseParts(parts, "brg", minQueryLength = 3)
+        assertEquals(1, matched.size)
+        assertEquals("BRG-6205-2RS", matched.first().partCode)
+    }
+
+    @Test
+    fun `paginateItems supports 25, 50, and 100 per page with boundary clamping`() {
+        val items = (1..120).toList()
+
+        val page1Size25 = paginateItems(items, pageIndex = 0, pageSize = 25)
+        assertEquals(5, page1Size25.totalPages)
+        assertEquals(1, page1Size25.startNumber)
+        assertEquals(25, page1Size25.endNumber)
+        assertEquals(25, page1Size25.items.size)
+
+        val lastPageSize25 = paginateItems(items, pageIndex = 99, pageSize = 25)
+        assertEquals(4, lastPageSize25.safePageIndex)
+        assertEquals(101, lastPageSize25.startNumber)
+        assertEquals(120, lastPageSize25.endNumber)
+        assertEquals(20, lastPageSize25.items.size)
+
+        val pageSize50 = paginateItems(items, pageIndex = 1, pageSize = 50)
+        assertEquals(3, pageSize50.totalPages)
+        assertEquals(51, pageSize50.startNumber)
+        assertEquals(100, pageSize50.endNumber)
+
+        val pageSize100 = paginateItems(items, pageIndex = 1, pageSize = 100)
+        assertEquals(2, pageSize100.totalPages)
+        assertEquals(101, pageSize100.startNumber)
+        assertEquals(120, pageSize100.endNumber)
+
+        val emptyPaged = paginateItems(emptyList<Int>(), pageIndex = 0, pageSize = 25)
+        assertEquals(0, emptyPaged.totalItems)
+        assertEquals(1, emptyPaged.totalPages)
+    }
+
+    @Test
+    fun `task priority is preserved in excel import template and backup json`() {
+        val baos = ByteArrayOutputStream()
+        ExcelImportEngine.writeImportTemplateXlsx(baos)
+        val preview = ExcelImportEngine.parseXlsx(
+            inputStream = ByteArrayInputStream(baos.toByteArray()),
+            defaultEngineer = "Alex Rivera"
+        )
+        assertEquals(2, preview.tasks.size)
+        assertEquals(ReminderPriority.HIGH, preview.tasks[0].priority)
+
+        val jsonWithPrio = """
+            {
+              "schemaVersion": 2,
+              "exportedAtMillis": 1700000000000,
+              "deviceLabel": "Pixel Tablet",
+              "groups": [],
+              "machines": [],
+              "engineers": [],
+              "tasks": [
+                {
+                  "uuid": "tsk-prio",
+                  "machineUuid": "m-1",
+                  "title": "Emergency Motor Inspection",
+                  "description": "",
+                  "cadence": "DAILY",
+                  "priority": "URGENT",
+                  "deadlineMillis": 1700010000000,
+                  "estimatedMinutes": 30,
+                  "personInCharge": "Elena Vance",
+                  "reminderEnabled": true,
+                  "reminderLeadHours": 12,
+                  "updatedAtMillis": 1700000000000
+                }
+              ],
+              "todos": [],
+              "serviceLogs": [],
+              "warehouseParts": []
+            }
+        """.trimIndent()
+        val decoded = BackupSyncManager.parseBackupJson(jsonWithPrio)
+        assertEquals("URGENT", decoded?.tasks?.firstOrNull()?.priority)
     }
 }

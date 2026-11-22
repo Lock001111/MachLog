@@ -1,9 +1,13 @@
-name: Build Android APK
+name: Build & Release Android APK
 
 on:
   workflow_dispatch:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -18,15 +22,36 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Generate debug keystore
+      - name: Prepare signing keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
-          keytool -genkey -v \
-            -keystore debug.keystore \
-            -storepass android \
-            -alias androiddebugkey \
-            -keypass android \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > debug.keystore
+            echo "Restored persistent keystore from ANDROID_KEYSTORE_BASE64 secret."
+          else
+            keytool -genkey -v \
+              -keystore debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+            echo "Generated fallback debug.keystore (configure ANDROID_KEYSTORE_BASE64 for in-place upgrades)."
+          fi
+
+      - name: Compute version metadata
+        id: version
+        run: |
+          VERSION_CODE="${{ github.run_number }}"
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            VERSION_NAME="${GITHUB_REF_NAME#v}"
+          else
+            VERSION_NAME="1.0.${{ github.run_number }}"
+          fi
+          echo "code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Set up Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4
@@ -34,10 +59,27 @@ jobs:
           gradle-version: '9.3.1'
 
       - name: Build Debug APK
-        run: gradle :app:assembleDebug
+        run: >
+          gradle :app:assembleDebug
+          -PappVersionCode=${{ steps.version.outputs.code }}
+          -PappVersionName=${{ steps.version.outputs.name }}
+
+      - name: Package versioned APK
+        run: |
+          mkdir -p dist
+          APK_SRC=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          cp "$APK_SRC" "dist/MachinaLog-${{ steps.version.outputs.tag }}.apk"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MachinaLog-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: MachinaLog-${{ steps.version.outputs.tag }}-apk
+          path: dist/*.apk
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: MachinaLog ${{ steps.version.outputs.tag }}
+          files: dist/*.apk
+          generate_release_notes: true

@@ -86,6 +86,7 @@ import com.example.ui.screens.MachinesScreen
 import com.example.ui.screens.ReportsScreen
 import com.example.ui.screens.TasksScreen
 import com.example.ui.screens.WarehousePartsScreen
+import com.example.ui.sheets.AppUpdateAvailableDialog
 import com.example.ui.sheets.CompleteTaskDialog
 import com.example.ui.sheets.ExcelImportPreviewDialog
 import com.example.ui.sheets.ExportReportDialog
@@ -502,6 +503,7 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                                     )
                                 },
                                 onUpdateTodoFilter = viewModel::updateTodoFilter,
+                                onSetTodoPageSize = viewModel::setTodoPageSize,
                                 onToggleTodoComplete = viewModel::toggleTodoComplete,
                                 onAddTodo = {
                                     editingTodo = null
@@ -584,7 +586,19 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                                     editingEngineer = eng
                                     showEngineerEditor = true
                                 },
-                                onDeleteEngineer = { eng -> viewModel.deleteEngineer(eng.id) }
+                                onDeleteEngineer = { eng -> viewModel.deleteEngineer(eng.id) },
+                                onCompleteTask = { task -> completingTask = task },
+                                onRejectTask = { task -> rejectingTask = task },
+                                onEditTask = { task ->
+                                    editingTask = task
+                                    taskDefaultMachineId = task.machineId
+                                    showTaskEditor = true
+                                },
+                                onViewEngineerTasksInTab = { engName ->
+                                    viewModel.focusEngineerTasks(engName)
+                                    tasksSubTab = 0
+                                    navigateToTab(ROUTE_TASKS)
+                                }
                             )
                         }
                         composable(ROUTE_REPORTS) {
@@ -620,8 +634,8 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                 viewModel.deleteTask(taskId)
                 showTaskEditor = false
             },
-            onSave = { id, uuid, machineId, groupId, title, desc, cadence, deadline, estMin, pic, assistants, remOn, leadHrs, lastComp ->
-                viewModel.saveTask(id, uuid, machineId, groupId, title, desc, cadence, deadline, estMin, pic, assistants, remOn, leadHrs, lastComp)
+            onSave = { id, uuid, machineId, groupId, title, desc, cadence, priority, deadline, estMin, pic, assistants, remOn, leadHrs, lastComp ->
+                viewModel.saveTask(id, uuid, machineId, groupId, title, desc, cadence, priority, deadline, estMin, pic, assistants, remOn, leadHrs, lastComp)
                 showTaskEditor = false
             }
         )
@@ -781,7 +795,9 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                 showSyncSettings = false
                 viewModel.refreshPcWebAddresses()
                 showPcWebDialog = true
-            }
+            },
+            onSetAutoCheckUpdates = viewModel::setAutoCheckUpdates,
+            onCheckForUpdates = { viewModel.checkForUpdates(manual = true) }
         )
     }
 
@@ -814,6 +830,13 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
             preview = preview,
             onDismiss = viewModel::dismissExcelImportPreview,
             onConfirm = viewModel::confirmExcelImport
+        )
+    }
+
+    state.availableUpdate?.let { updateInfo ->
+        AppUpdateAvailableDialog(
+            info = updateInfo,
+            onDismiss = viewModel::dismissUpdateDialog
         )
     }
 }

@@ -63,6 +63,7 @@ import com.example.data.CustomGroupEntity
 import com.example.data.EngineerEntity
 import com.example.data.MachineEntity
 import com.example.data.MaintenanceTaskEntity
+import com.example.data.ReminderPriority
 import com.example.data.Severity
 import com.example.data.SparePartDraft
 import com.example.data.WarehousePartEntity
@@ -93,6 +94,7 @@ fun TaskEditorDialog(
         title: String,
         description: String,
         cadence: Cadence,
+        priority: ReminderPriority,
         deadlineMillis: Long,
         estimatedMinutes: Int,
         personInCharge: String,
@@ -109,6 +111,7 @@ fun TaskEditorDialog(
     var title by remember { mutableStateOf(initialTask?.title ?: "") }
     var description by remember { mutableStateOf(initialTask?.description ?: "") }
     var cadence by remember { mutableStateOf(initialTask?.cadence ?: Cadence.ONCE) }
+    var priority by remember { mutableStateOf(initialTask?.priority ?: ReminderPriority.NORMAL) }
     var deadlineMillis by remember {
         mutableStateOf(initialTask?.deadlineMillis ?: (System.currentTimeMillis() + TimeUnit.HOURS.toMillis(8)))
     }
@@ -264,6 +267,21 @@ fun TaskEditorDialog(
                     )
                 }
 
+                Text("Task Priority", style = MaterialTheme.typography.labelLarge)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                ) {
+                    ReminderPriority.entries.forEach { prio ->
+                        FilterChip(
+                            selected = priority == prio,
+                            onClick = { priority = prio },
+                            label = { Text(prio.label) },
+                            modifier = Modifier.testTag("task_editor_priority_${prio.name.lowercase()}")
+                        )
+                    }
+                }
+
                 DateTimePickerField(
                     label = "Service Deadline",
                     millis = deadlineMillis,
@@ -401,6 +419,7 @@ fun TaskEditorDialog(
                         title,
                         description,
                         cadence,
+                        priority,
                         deadlineMillis,
                         estimatedMinutesText.toIntOrNull() ?: 30,
                         validPic,
@@ -785,6 +804,7 @@ fun SparePartsEditorSection(
     warehouseCatalog: List<WarehousePartEntity> = emptyList()
 ) {
     var usedWarehousePart by remember { mutableStateOf(spareParts.isNotEmpty()) }
+    var catalogSearchQuery by remember { mutableStateOf("") }
     var showWarehousePicker by remember { mutableStateOf(false) }
     var showManualEntry by remember { mutableStateOf(false) }
     var partCode by remember { mutableStateOf("") }
@@ -793,6 +813,31 @@ fun SparePartsEditorSection(
     var fromWarehouse by remember { mutableStateOf(true) }
     var qtyText by remember { mutableStateOf("1") }
     var unit by remember { mutableStateOf("pcs") }
+
+    fun addSelectedWarehousePart(selected: WarehousePartEntity) {
+        val existingIdx = spareParts.indexOfFirst {
+            it.fromWarehouse && it.partCode.equals(selected.partCode, ignoreCase = true)
+        }
+        if (existingIdx >= 0) {
+            val cur = spareParts[existingIdx]
+            spareParts[existingIdx] = cur.copy(quantity = cur.quantity + 1)
+        } else {
+            spareParts.add(
+                SparePartDraft(
+                    partName = selected.partName.ifBlank { selected.partCode },
+                    partCode = selected.partCode,
+                    partDescription = selected.partDescription,
+                    fromWarehouse = true,
+                    quantity = 1,
+                    unit = selected.defaultUnit.ifBlank { "pcs" }
+                )
+            )
+        }
+    }
+
+    val matchingCatalogParts = remember(warehouseCatalog, catalogSearchQuery) {
+        filterWarehouseParts(warehouseCatalog, catalogSearchQuery, minQueryLength = 3)
+    }
 
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
@@ -814,7 +859,7 @@ fun SparePartsEditorSection(
                         style = MaterialTheme.typography.labelLarge
                     )
                     Text(
-                        text = "Search & pick spare part ID/description if used",
+                        text = "Search spare part ID/code or description (min 3 letters)",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -895,7 +940,123 @@ fun SparePartsEditorSection(
             }
 
             if (usedWarehousePart) {
-                Button(
+                OutlinedTextField(
+                    value = catalogSearchQuery,
+                    onValueChange = { catalogSearchQuery = it },
+                    label = { Text("Search Warehouse Part ID or Keyword") },
+                    placeholder = { Text("Type at least 3 letters (e.g. BRG, seal, HF-40)...") },
+                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (catalogSearchQuery.isNotEmpty()) {
+                            IconButton(onClick = { catalogSearchQuery = "" }) {
+                                Icon(Icons.Filled.Close, contentDescription = "Clear spare part search")
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("complete_task_spare_part_search_input")
+                )
+
+                val cleanLen = catalogSearchQuery.trim().length
+                if (cleanLen < 3) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = if (cleanLen == 0) {
+                                "List hidden (${warehouseCatalog.size} parts in catalog). Enter at least 3 characters (Part ID/code or description) to display matching spare parts."
+                            } else {
+                                "Enter ${3 - cleanLen} more character${if (3 - cleanLen == 1) "" else "s"} to search warehouse spare parts..."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                } else if (matchingCatalogParts.isEmpty()) {
+                    Text(
+                        text = "No warehouse parts matched \"$catalogSearchQuery\".",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Text(
+                        text = "Found ${matchingCatalogParts.size} matching part(s) — tap to add:",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        matchingCatalogParts.take(25).forEach { item ->
+                            val existingQty = spareParts.firstOrNull {
+                                it.fromWarehouse && it.partCode.equals(item.partCode, ignoreCase = true)
+                            }?.quantity ?: 0
+                            Surface(
+                                onClick = { addSelectedWarehousePart(item) },
+                                color = if (existingQty > 0) {
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                                } else {
+                                    MaterialTheme.colorScheme.surface
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (existingQty > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("inline_warehouse_part_${item.id}")
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "[${item.partCode}] ${item.partName.ifBlank { item.partDescription }}",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        if (item.partDescription.isNotBlank()) {
+                                            Text(
+                                                text = item.partDescription,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                    Spacer(Modifier.width(6.dp))
+                                    if (existingQty > 0) {
+                                        StatusPill(
+                                            text = "Added ×$existingQty",
+                                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Filled.Add,
+                                            contentDescription = "Add ${item.partCode}",
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                OutlinedButton(
                     onClick = { showWarehousePicker = true },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -904,7 +1065,7 @@ fun SparePartsEditorSection(
                 ) {
                     Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Select from Warehouse Catalog (${warehouseCatalog.size})")
+                    Text("Open Expanded Part Search (${warehouseCatalog.size})")
                 }
 
                 TextButton(
@@ -1045,13 +1206,14 @@ fun SearchableWarehousePartPickerDialog(
     onSelectPart: (WarehousePartEntity) -> Unit
 ) {
     var query by remember { mutableStateOf("") }
+    val cleanLen = query.trim().length
     val filtered = remember(catalog, query) {
-        filterWarehouseParts(catalog, query)
+        filterWarehouseParts(catalog, query, minQueryLength = 3)
     }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Select Warehouse Spare Part") },
+        title = { Text("Search Warehouse Spare Part") },
         text = {
             Column(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1060,7 +1222,7 @@ fun SearchableWarehousePartPickerDialog(
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    placeholder = { Text("Search by ID/code or description...") },
+                    placeholder = { Text("Type 3+ characters (ID/code or description)...") },
                     leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                     trailingIcon = {
                         if (query.isNotEmpty()) {
@@ -1076,7 +1238,11 @@ fun SearchableWarehousePartPickerDialog(
                 )
 
                 Text(
-                    text = "Showing ${filtered.size} of ${catalog.size} warehouse parts",
+                    text = if (cleanLen < 3) {
+                        "Type at least 3 characters to search ${catalog.size} warehouse parts"
+                    } else {
+                        "Showing ${filtered.size} match(es) in ${catalog.size} warehouse parts"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1088,10 +1254,10 @@ fun SearchableWarehousePartPickerDialog(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            text = if (catalog.isEmpty()) {
-                                "Your Warehouse catalog is empty. Add parts in the Parts tab or import via Excel."
-                            } else {
-                                "No spare parts matched \"$query\". Try another part code or keyword."
+                            text = when {
+                                catalog.isEmpty() -> "Your Warehouse catalog is empty. Add parts in the Parts tab or import via Excel."
+                                cleanLen < 3 -> "Enter at least 3 letters or digits of a Part ID/code or description to display matching spare parts."
+                                else -> "No spare parts matched \"$query\". Try another part code or keyword."
                             },
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.padding(14.dp)

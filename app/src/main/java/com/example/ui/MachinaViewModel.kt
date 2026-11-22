@@ -25,6 +25,9 @@ import com.example.data.SparePartDraft
 import com.example.data.TodoReminderEntity
 import com.example.data.UserPreferences
 import com.example.data.WarehousePartEntity
+import com.example.BuildConfig
+import com.example.engine.AppUpdateChecker
+import com.example.engine.AppUpdateInfo
 import com.example.engine.BackupSyncManager
 import com.example.engine.ExcelImportEngine
 import com.example.engine.ExcelImportPreview
@@ -69,17 +72,20 @@ enum class MachineGroupBy(val label: String) {
 
 data class TasksFilterState(
     val cadence: Cadence? = null,
+    val priority: ReminderPriority? = null,
     val overdueOnly: Boolean = false,
     val groupId: Long? = null,
     val picFilter: String? = null,
     val searchQuery: String = "",
-    val groupBy: TaskGroupBy = TaskGroupBy.CUSTOM_GROUP
+    val groupBy: TaskGroupBy = TaskGroupBy.CUSTOM_GROUP,
+    val sortAscending: Boolean = true
 )
 
 data class TodoFilterState(
     val repeatRule: RepeatRule? = null,
     val showCompleted: Boolean = false,
-    val searchQuery: String = ""
+    val searchQuery: String = "",
+    val currentPage: Int = 0
 )
 
 data class MachineFilterState(
@@ -87,6 +93,12 @@ data class MachineFilterState(
     val groupId: Long? = null,
     val groupBy: MachineGroupBy = MachineGroupBy.CUSTOM_GROUP,
     val searchQuery: String = ""
+)
+
+data class UpdateUiBundle(
+    val availableUpdate: AppUpdateInfo? = null,
+    val isCheckingUpdate: Boolean = false,
+    val updateStatusText: String? = null
 )
 
 data class MachinaUiState(
@@ -107,6 +119,9 @@ data class MachinaUiState(
     val warehouseParts: List<WarehousePartEntity> = emptyList(),
     val engineers: List<EngineerEntity> = emptyList(),
     val webPortalStatus: WebPortalStatus = WebPortalStatus(),
+    val availableUpdate: AppUpdateInfo? = null,
+    val isCheckingUpdate: Boolean = false,
+    val updateStatusText: String? = null,
     val isBusy: Boolean = false
 ) {
     val knownEngineers: List<String>
@@ -137,6 +152,12 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
     private val _pendingImportPreview = MutableStateFlow<PortableBackupPackage?>(null)
     private val _pendingExcelImportPreview = MutableStateFlow<ExcelImportPreview?>(null)
     private val _isBusy = MutableStateFlow(false)
+    private val _availableUpdate = MutableStateFlow<AppUpdateInfo?>(null)
+    private val _isCheckingUpdate = MutableStateFlow(false)
+    private val _updateStatusText = MutableStateFlow<String?>(null)
+    private val _updateBundleFlow = combine(_availableUpdate, _isCheckingUpdate, _updateStatusText) { avail, checking, status ->
+        UpdateUiBundle(avail, checking, status)
+    }
 
     private val _events = MutableSharedFlow<UiEvent>()
     val events: SharedFlow<UiEvent> = _events.asSharedFlow()
@@ -159,7 +180,8 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
         _isBusy,
         repo.warehousePartsFlow,
         LocalWebServerManager.status,
-        repo.engineersFlow
+        repo.engineersFlow,
+        _updateBundleFlow
     ) { values ->
         @Suppress("UNCHECKED_CAST")
         val groups = values[0] as List<CustomGroupEntity>
@@ -187,6 +209,7 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
         val webStatus = values[16] as WebPortalStatus
         @Suppress("UNCHECKED_CAST")
         val engineersList = values[17] as List<EngineerEntity>
+        val updateBundle = values[18] as UpdateUiBundle
 
         val resolvedSelectedId = if (selMachine != null && machines.any { it.id == selMachine }) {
             selMachine
@@ -212,6 +235,9 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
             warehouseParts = warehouseCatalog,
             engineers = engineersList,
             webPortalStatus = webStatus,
+            availableUpdate = updateBundle.availableUpdate,
+            isCheckingUpdate = updateBundle.isCheckingUpdate,
+            updateStatusText = updateBundle.updateStatusText,
             isBusy = busy
         )
     }.stateIn(
@@ -239,6 +265,9 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
             MaintenanceReminderScheduler.scheduleReminders(application, settings.notificationsEnabled)
             MaintenanceReminderScheduler.scheduleAutoBackup(application, settings.autoBackupFrequency)
             refreshLocalBackups()
+            if (settings.autoCheckUpdates) {
+                checkForUpdates(manual = false)
+            }
         }
     }
 
@@ -248,13 +277,66 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun checkForUpdates(manual: Boolean) {
+        if (_isCheckingUpdate.value) return
+        viewModelScope.launch {
+            _isCheckingUpdate.value = true
+            val outcome = AppUpdateChecker.checkLatestRelease(
+                currentVersionName = BuildConfig.VERSION_NAME,
+                currentVersionCode = BuildConfig.VERSION_CODE
+            )
+            _isCheckingUpdate.value = false
+            val now = System.currentTimeMillis()
+            val info = outcome.info
+            if (info != null) {
+                prefs.recordUpdateCheck(now, info.latestTag)
+                if (info.isUpdateAvailable) {
+                    _availableUpdate.value = info
+                    _updateStatusText.value = "Update available: ${info.latestTag} (installed v${BuildConfig.VERSION_NAME})"
+                } else {
+                    _updateStatusText.value = outcome.errorMessage ?: "Up to date (v${BuildConfig.VERSION_NAME})"
+                    if (manual) {
+                        _events.emit(UiEvent.Snackbar(outcome.errorMessage ?: "MachinaLog v${BuildConfig.VERSION_NAME} is up to date"))
+                    }
+                }
+            } else {
+                val err = outcome.errorMessage ?: "Unable to check updates right now."
+                _updateStatusText.value = err
+                if (manual) {
+                    _events.emit(UiEvent.Snackbar(err))
+                }
+            }
+        }
+    }
+
+    fun dismissUpdateDialog() {
+        _availableUpdate.value = null
+    }
+
+    fun setAutoCheckUpdates(enabled: Boolean) {
+        viewModelScope.launch {
+            prefs.setAutoCheckUpdates(enabled)
+        }
+    }
+
     // --- Filter Mutations ---
     fun updateTasksFilter(transform: (TasksFilterState) -> TasksFilterState) {
         _tasksFilter.value = transform(_tasksFilter.value)
     }
 
+    fun focusEngineerTasks(engineerName: String) {
+        _tasksFilter.value = TasksFilterState(picFilter = engineerName)
+    }
+
     fun updateTodoFilter(transform: (TodoFilterState) -> TodoFilterState) {
         _todoFilter.value = transform(_todoFilter.value)
+    }
+
+    fun setTodoPageSize(size: Int) {
+        viewModelScope.launch {
+            prefs.setTodoPageSize(size)
+            _todoFilter.value = _todoFilter.value.copy(currentPage = 0)
+        }
     }
 
     fun updateMachineFilter(transform: (MachineFilterState) -> MachineFilterState) {
@@ -398,6 +480,7 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
         title: String,
         description: String,
         cadence: Cadence,
+        priority: ReminderPriority,
         deadlineMillis: Long,
         estimatedMinutes: Int,
         personInCharge: String,
@@ -414,6 +497,7 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
                     title = title.trim(),
                     description = description.trim(),
                     cadence = cadence,
+                    priority = priority,
                     deadlineMillis = deadlineMillis,
                     estimatedMinutes = estimatedMinutes.coerceAtLeast(1),
                     personInCharge = personInCharge.trim(),
@@ -430,6 +514,7 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
                     title = title.trim(),
                     description = description.trim(),
                     cadence = cadence,
+                    priority = priority,
                     deadlineMillis = deadlineMillis,
                     estimatedMinutes = estimatedMinutes.coerceAtLeast(1),
                     personInCharge = personInCharge.trim(),

@@ -23,7 +23,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Badge
+import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
@@ -34,13 +37,16 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -57,11 +63,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.EngineerEntity
+import com.example.data.MachineEntity
+import com.example.data.MaintenanceTaskEntity
 import com.example.data.TaskOutcome
 import com.example.data.parseEngineerList
+import com.example.engine.Formatters
 import com.example.ui.MachinaUiState
+import com.example.ui.components.CadencePill
 import com.example.ui.components.EmptyStateCard
 import com.example.ui.components.KpiMetricCard
+import com.example.ui.components.PriorityPill
 import com.example.ui.components.StatusPill
 import com.example.ui.theme.LocalMachinaColors
 
@@ -71,10 +82,16 @@ fun EngineersScreen(
     onAddEngineer: () -> Unit,
     onEditEngineer: (EngineerEntity) -> Unit,
     onDeleteEngineer: (EngineerEntity) -> Unit,
+    onCompleteTask: (MaintenanceTaskEntity) -> Unit,
+    onRejectTask: (MaintenanceTaskEntity) -> Unit,
+    onEditTask: (MaintenanceTaskEntity) -> Unit,
+    onViewEngineerTasksInTab: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var searchQuery by remember { mutableStateOf("") }
+    var inspectingEngineerId by remember { mutableStateOf<Long?>(null) }
     val sem = LocalMachinaColors.current
+    val machinesById = remember(state.machines) { state.machines.associateBy { it.id } }
 
     val filtered = remember(state.engineers, searchQuery) {
         val q = searchQuery.trim().lowercase()
@@ -172,6 +189,7 @@ fun EngineersScreen(
                     engineer = engineer,
                     activeCount = activePicCount,
                     historyCount = historyCount,
+                    onInspectActiveTasks = { inspectingEngineerId = engineer.id },
                     onEdit = { onEditEngineer(engineer) },
                     onDelete = { onDeleteEngineer(engineer) }
                 )
@@ -182,6 +200,29 @@ fun EngineersScreen(
             Spacer(Modifier.height(72.dp))
         }
     }
+
+    val inspectingEngineer = inspectingEngineerId?.let { id -> state.engineers.find { it.id == id } }
+    if (inspectingEngineer != null) {
+        val assignedTasks = remember(state.tasks, inspectingEngineer.name) {
+            state.tasks.filter { t ->
+                t.personInCharge.equals(inspectingEngineer.name, ignoreCase = true) ||
+                    parseEngineerList(t.assistantEngineers).any { it.equals(inspectingEngineer.name, ignoreCase = true) }
+            }.sortedBy { it.deadlineMillis }
+        }
+        EngineerActiveTasksDialog(
+            engineer = inspectingEngineer,
+            tasks = assignedTasks,
+            machinesById = machinesById,
+            onDismiss = { inspectingEngineerId = null },
+            onCompleteTask = onCompleteTask,
+            onRejectTask = onRejectTask,
+            onEditTask = onEditTask,
+            onViewInTasksTab = {
+                inspectingEngineerId = null
+                onViewEngineerTasksInTab(inspectingEngineer.name)
+            }
+        )
+    }
 }
 
 @Composable
@@ -189,6 +230,7 @@ private fun EngineerCard(
     engineer: EngineerEntity,
     activeCount: Int,
     historyCount: Int,
+    onInspectActiveTasks: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -258,12 +300,41 @@ private fun EngineerCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatusPill(
-                        text = "$activeCount Active Tasks",
-                        containerColor = if (activeCount > 0) sem.infoContainer else MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = if (activeCount > 0) sem.info else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        onClick = onInspectActiveTasks,
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (activeCount > 0) sem.infoContainer else MaterialTheme.colorScheme.surfaceVariant,
+                        border = BorderStroke(
+                            width = 1.dp,
+                            color = if (activeCount > 0) sem.info.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outlineVariant
+                        ),
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("engineer_active_tasks_button_${engineer.id}")
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "$activeCount Active Tasks",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (activeCount > 0) sem.info else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.width(2.dp))
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = "View active tasks",
+                                tint = if (activeCount > 0) sem.info else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
                     StatusPill(
                         text = "$historyCount Logged",
                         containerColor = sem.operationalContainer,
@@ -296,6 +367,142 @@ private fun EngineerCard(
             }
         }
     }
+}
+
+@Composable
+private fun EngineerActiveTasksDialog(
+    engineer: EngineerEntity,
+    tasks: List<MaintenanceTaskEntity>,
+    machinesById: Map<Long, MachineEntity>,
+    onDismiss: () -> Unit,
+    onCompleteTask: (MaintenanceTaskEntity) -> Unit,
+    onRejectTask: (MaintenanceTaskEntity) -> Unit,
+    onEditTask: (MaintenanceTaskEntity) -> Unit,
+    onViewInTasksTab: () -> Unit
+) {
+    val now = System.currentTimeMillis()
+    val sem = LocalMachinaColors.current
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text("${engineer.name} · Active Tasks (${tasks.size})")
+                Text(
+                    text = "${engineer.role} · ${engineer.shift}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier
+                    .heightIn(max = 460.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                if (tasks.isEmpty()) {
+                    Text(
+                        text = "No active tasks currently assigned to ${engineer.name} as PIC or assistant.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    tasks.forEach { task ->
+                        val machine = machinesById[task.machineId]
+                        val isPic = task.personInCharge.equals(engineer.name, ignoreCase = true)
+                        val isOverdue = task.deadlineMillis < now
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+                            border = BorderStroke(
+                                width = 1.dp,
+                                color = if (isOverdue) sem.critical.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outlineVariant
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("engineer_modal_task_${task.id}")
+                        ) {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.padding(10.dp)
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                                ) {
+                                    PriorityPill(task.priority)
+                                    CadencePill(task.cadence)
+                                    StatusPill(
+                                        text = if (isPic) "PIC" else "Assistant",
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                                Text(task.title, style = MaterialTheme.typography.titleSmall)
+                                if (machine != null) {
+                                    Text(
+                                        text = "${machine.assetCode} · ${machine.name}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Text(
+                                    text = "${Formatters.formatRelativeDeadline(task.deadlineMillis, now)} · ${Formatters.formatDateTime(task.deadlineMillis)}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isOverdue) sem.critical else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    TextButton(onClick = { onEditTask(task) }) {
+                                        Text("Edit")
+                                    }
+                                    OutlinedButton(
+                                        onClick = { onRejectTask(task) },
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = sem.critical),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Icon(Icons.Filled.Block, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Reject")
+                                    }
+                                    Button(
+                                        onClick = { onCompleteTask(task) },
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Complete")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (tasks.isNotEmpty()) {
+                Button(
+                    onClick = onViewInTasksTab,
+                    modifier = Modifier.testTag("engineer_filter_in_tasks_button")
+                ) {
+                    Text("Filter in Tasks Tab")
+                }
+            } else {
+                TextButton(onClick = onDismiss) { Text("Close") }
+            }
+        },
+        dismissButton = {
+            if (tasks.isNotEmpty()) {
+                TextButton(onClick = onDismiss) { Text("Close") }
+            }
+        }
+    )
 }
 
 @Composable

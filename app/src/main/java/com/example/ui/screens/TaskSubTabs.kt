@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -40,6 +41,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -76,10 +78,40 @@ import com.example.ui.components.StatusPill
 import com.example.ui.components.TaskOutcomePill
 import com.example.ui.theme.LocalMachinaColors
 
+data class PagedResult<T>(
+    val items: List<T>,
+    val safePageIndex: Int,
+    val totalPages: Int,
+    val totalItems: Int,
+    val startNumber: Int,
+    val endNumber: Int
+)
+
+fun <T> paginateItems(items: List<T>, pageIndex: Int, pageSize: Int): PagedResult<T> {
+    val safeSize = if (pageSize in listOf(25, 50, 100)) pageSize else 25
+    val total = items.size
+    if (total == 0) {
+        return PagedResult(emptyList(), safePageIndex = 0, totalPages = 1, totalItems = 0, startNumber = 0, endNumber = 0)
+    }
+    val totalPages = ((total + safeSize - 1) / safeSize).coerceAtLeast(1)
+    val safePage = pageIndex.coerceIn(0, totalPages - 1)
+    val from = safePage * safeSize
+    val to = (from + safeSize).coerceAtMost(total)
+    return PagedResult(
+        items = items.subList(from, to),
+        safePageIndex = safePage,
+        totalPages = totalPages,
+        totalItems = total,
+        startNumber = from + 1,
+        endNumber = to
+    )
+}
+
 @Composable
 fun TodoRemindersSubTab(
     state: MachinaUiState,
     onUpdateFilter: ((TodoFilterState) -> TodoFilterState) -> Unit,
+    onSetPageSize: (Int) -> Unit,
     onToggleComplete: (TodoReminderEntity) -> Unit,
     onAddTodo: () -> Unit,
     onEditTodo: (TodoReminderEntity) -> Unit,
@@ -91,13 +123,15 @@ fun TodoRemindersSubTab(
     val groupsById = remember(state.groups) { state.groups.associateBy { it.id } }
     val filter = state.todoFilter
     val sem = LocalMachinaColors.current
+    val pageSize = state.preferences.todoPageSize.let { if (it in listOf(25, 50, 100)) it else 25 }
 
     val activeCount = remember(state.todos) { state.todos.count { !it.isCompleted } }
+    val completedCount = remember(state.todos) { state.todos.count { it.isCompleted } }
     val overdueCount = remember(state.todos, now) {
         state.todos.count { !it.isCompleted && it.dueAtMillis < now }
     }
     val recurringCount = remember(state.todos) {
-        state.todos.count { it.repeatRule != RepeatRule.ONCE }
+        state.todos.count { !it.isCompleted && it.repeatRule != RepeatRule.ONCE }
     }
 
     val filteredTodos = remember(state.todos, filter, machinesById) {
@@ -112,7 +146,13 @@ fun TodoRemindersSubTab(
                 td.personInCharge.contains(q, ignoreCase = true) ||
                 (m?.name?.contains(q, ignoreCase = true) == true)
             matchRule && matchCompleted && matchQuery
-        }
+        }.sortedWith(
+            compareBy<TodoReminderEntity> { it.isCompleted }
+                .thenBy { td -> if (!td.isCompleted) td.dueAtMillis else -(td.completedAtMillis ?: td.dueAtMillis) }
+        )
+    }
+    val pagedTodos = remember(filteredTodos, filter.currentPage, pageSize) {
+        paginateItems(filteredTodos, filter.currentPage, pageSize)
     }
 
     LazyColumn(
@@ -153,12 +193,12 @@ fun TodoRemindersSubTab(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = filter.searchQuery,
-                    onValueChange = { q -> onUpdateFilter { it.copy(searchQuery = q) } },
+                    onValueChange = { q -> onUpdateFilter { it.copy(searchQuery = q, currentPage = 0) } },
                     placeholder = { Text("Search reminders, notes, or PIC...") },
                     leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Search reminders") },
                     trailingIcon = {
                         if (filter.searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { onUpdateFilter { it.copy(searchQuery = "") } }) {
+                            IconButton(onClick = { onUpdateFilter { it.copy(searchQuery = "", currentPage = 0) } }) {
                                 Icon(Icons.Filled.Clear, contentDescription = "Clear search")
                             }
                         }
@@ -178,7 +218,7 @@ fun TodoRemindersSubTab(
                 ) {
                     FilterChip(
                         selected = filter.repeatRule == null,
-                        onClick = { onUpdateFilter { it.copy(repeatRule = null) } },
+                        onClick = { onUpdateFilter { it.copy(repeatRule = null, currentPage = 0) } },
                         label = { Text("All Schedules") }
                     )
                     RepeatRule.entries.forEach { rule ->
@@ -186,19 +226,78 @@ fun TodoRemindersSubTab(
                             selected = filter.repeatRule == rule,
                             onClick = {
                                 onUpdateFilter {
-                                    it.copy(repeatRule = if (it.repeatRule == rule) null else rule)
+                                    it.copy(
+                                        repeatRule = if (it.repeatRule == rule) null else rule,
+                                        currentPage = 0
+                                    )
                                 }
                             },
                             label = { Text(rule.label) },
                             modifier = Modifier.testTag("todo_rule_chip_${rule.name.lowercase()}")
                         )
                     }
-                    FilterChip(
-                        selected = filter.showCompleted,
-                        onClick = { onUpdateFilter { it.copy(showCompleted = !it.showCompleted) } },
-                        label = { Text("Show Done") },
-                        modifier = Modifier.testTag("todo_show_completed_chip")
-                    )
+                }
+
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onUpdateFilter { it.copy(showCompleted = !it.showCompleted, currentPage = 0) }
+                                }
+                        ) {
+                            Checkbox(
+                                checked = filter.showCompleted,
+                                onCheckedChange = { checked ->
+                                    onUpdateFilter { it.copy(showCompleted = checked, currentPage = 0) }
+                                },
+                                modifier = Modifier
+                                    .minimumInteractiveComponentSize()
+                                    .testTag("todo_show_completed_checkbox")
+                            )
+                            Text(
+                                text = "Show Completed ($completedCount)",
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (filteredTodos.isNotEmpty()) {
+                                Text(
+                                    text = "${pagedTodos.startNumber}–${pagedTodos.endNumber} of ${pagedTodos.totalItems}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.horizontalScroll(rememberScrollState())
+                        ) {
+                            Text(
+                                text = "Per page:",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            listOf(25, 50, 100).forEach { sizeOption ->
+                                FilterChip(
+                                    selected = pageSize == sizeOption,
+                                    onClick = { onSetPageSize(sizeOption) },
+                                    label = { Text("$sizeOption") },
+                                    modifier = Modifier.testTag("todo_page_size_$sizeOption")
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -214,7 +313,7 @@ fun TodoRemindersSubTab(
                 )
             }
         } else {
-            items(filteredTodos, key = { "todo_${it.id}" }) { todo ->
+            items(pagedTodos.items, key = { "todo_${it.id}" }) { todo ->
                 val machine = todo.machineId?.let { machinesById[it] }
                 val group = todo.groupId?.let { groupsById[it] }
                 TodoReminderCard(
@@ -226,6 +325,47 @@ fun TodoRemindersSubTab(
                     onEdit = { onEditTodo(todo) },
                     onDelete = { onDeleteTodo(todo) }
                 )
+            }
+
+            if (pagedTodos.totalPages > 1 || pagedTodos.totalItems > 25) {
+                item(key = "todo_pagination_bar") {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                onUpdateFilter { it.copy(currentPage = (pagedTodos.safePageIndex - 1).coerceAtLeast(0)) }
+                            },
+                            enabled = pagedTodos.safePageIndex > 0,
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("todo_prev_page_button")
+                        ) {
+                            Text("Prev")
+                        }
+                        Text(
+                            text = "Page ${pagedTodos.safePageIndex + 1} of ${pagedTodos.totalPages}",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                        OutlinedButton(
+                            onClick = {
+                                onUpdateFilter {
+                                    it.copy(currentPage = (pagedTodos.safePageIndex + 1).coerceAtMost(pagedTodos.totalPages - 1))
+                                }
+                            },
+                            enabled = pagedTodos.safePageIndex < pagedTodos.totalPages - 1,
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("todo_next_page_button")
+                        ) {
+                            Text("Next")
+                        }
+                    }
+                }
             }
         }
 
@@ -326,7 +466,8 @@ private fun TodoReminderCard(
                 ) {
                     StatusPill(
                         text = if (todo.isCompleted) {
-                            "Done"
+                            val doneAt = todo.completedAtMillis
+                            if (doneAt != null) "Done · ${Formatters.formatDateTime(doneAt)}" else "Done"
                         } else if (isOverdue) {
                             Formatters.formatRelativeDeadline(todo.dueAtMillis, nowMillis)
                         } else {

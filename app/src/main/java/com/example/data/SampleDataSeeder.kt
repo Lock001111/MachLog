@@ -162,6 +162,7 @@ object SampleDataSeeder {
                 estimatedMinutes = 20,
                 personInCharge = "Elena Vance",
                 assistantEngineers = "Alex Rivera",
+                priority = ReminderPriority.HIGH,
                 reminderEnabled = true,
                 reminderLeadHours = 4,
                 lastCompletedMillis = now - day,
@@ -178,6 +179,7 @@ object SampleDataSeeder {
                 deadlineMillis = now - 2 * hour, // Overdue
                 estimatedMinutes = 25,
                 personInCharge = "Marcus Chen",
+                priority = ReminderPriority.URGENT,
                 reminderEnabled = true,
                 reminderLeadHours = 2,
                 lastCompletedMillis = now - 2 * day,
@@ -195,6 +197,7 @@ object SampleDataSeeder {
                 estimatedMinutes = 35,
                 personInCharge = "Darius Patel",
                 assistantEngineers = "Marcus Chen",
+                priority = ReminderPriority.URGENT,
                 reminderEnabled = true,
                 reminderLeadHours = 24,
                 lastCompletedMillis = now - 8 * day,
@@ -211,6 +214,7 @@ object SampleDataSeeder {
                 deadlineMillis = now + 2 * day,
                 estimatedMinutes = 45,
                 personInCharge = "Elena Vance",
+                priority = ReminderPriority.NORMAL,
                 reminderEnabled = true,
                 reminderLeadHours = 24,
                 lastCompletedMillis = now - 5 * day,
@@ -228,6 +232,7 @@ object SampleDataSeeder {
                 estimatedMinutes = 90,
                 personInCharge = "Sofia Novak",
                 assistantEngineers = "Elena Vance",
+                priority = ReminderPriority.NORMAL,
                 reminderEnabled = true,
                 reminderLeadHours = 48,
                 lastCompletedMillis = now - 25 * day,
@@ -245,6 +250,7 @@ object SampleDataSeeder {
                 estimatedMinutes = 75,
                 personInCharge = "Marcus Chen",
                 assistantEngineers = "Darius Patel",
+                priority = ReminderPriority.HIGH,
                 reminderEnabled = true,
                 reminderLeadHours = 24,
                 lastCompletedMillis = now - 32 * day,
@@ -262,6 +268,7 @@ object SampleDataSeeder {
                 estimatedMinutes = 240,
                 personInCharge = "Sofia Novak",
                 assistantEngineers = "Marcus Chen, Alex Rivera",
+                priority = ReminderPriority.NORMAL,
                 reminderEnabled = true,
                 reminderLeadHours = 72,
                 lastCompletedMillis = now - 347 * day,
@@ -279,6 +286,7 @@ object SampleDataSeeder {
                 estimatedMinutes = 40,
                 personInCharge = "Darius Patel",
                 assistantEngineers = "Elena Vance",
+                priority = ReminderPriority.HIGH,
                 reminderEnabled = true,
                 reminderLeadHours = 6,
                 updatedAtMillis = now
@@ -350,6 +358,54 @@ object SampleDataSeeder {
                 reminderEnabled = true,
                 priority = ReminderPriority.HIGH,
                 updatedAtMillis = now
+            )
+        )
+        // Historical completed To-Do reminders so "Show Completed" displays recorded completions right away
+        dao.insertTodo(
+            TodoReminderEntity(
+                title = "Morning Shift Handover Safety Briefing",
+                notes = "Verified LOTO locks on Bay 2 Hydraulic Press prior to restart.",
+                machineId = m2,
+                groupId = gSafetyId,
+                personInCharge = "Elena Vance",
+                repeatRule = RepeatRule.DAILY,
+                dueAtMillis = now - day - 1 * hour,
+                reminderEnabled = true,
+                isCompleted = true,
+                priority = ReminderPriority.URGENT,
+                completedAtMillis = now - day,
+                updatedAtMillis = now - day
+            )
+        )
+        dao.insertTodo(
+            TodoReminderEntity(
+                title = "Restock M12 Proximity Sensors at Line A Cabinet",
+                notes = "Placed 8 sealed PNP sensors in Bin C-04.",
+                machineId = m4,
+                groupId = gPackId,
+                personInCharge = "Alex Rivera",
+                repeatRule = RepeatRule.ONCE,
+                dueAtMillis = now - 3 * day,
+                reminderEnabled = true,
+                isCompleted = true,
+                priority = ReminderPriority.NORMAL,
+                completedAtMillis = now - 3 * day + 2 * hour,
+                updatedAtMillis = now - 3 * day
+            )
+        )
+        dao.insertTodo(
+            TodoReminderEntity(
+                title = "Export Weekly Plant Maintenance Excel Report",
+                notes = "Distributed last week's PM & malfunction report to operations team.",
+                groupId = gPackId,
+                personInCharge = "Marcus Chen",
+                repeatRule = RepeatRule.WEEKLY,
+                dueAtMillis = now - 4 * day,
+                reminderEnabled = true,
+                isCompleted = true,
+                priority = ReminderPriority.NORMAL,
+                completedAtMillis = now - 4 * day + hour,
+                updatedAtMillis = now - 4 * day
             )
         )
 

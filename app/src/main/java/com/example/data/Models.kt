@@ -157,6 +157,7 @@ data class MaintenanceTaskEntity(
     val estimatedMinutes: Int = 30,
     val personInCharge: String,
     val assistantEngineers: String = "",
+    val priority: ReminderPriority = ReminderPriority.NORMAL,
     val reminderEnabled: Boolean = true,
     val reminderLeadHours: Int = 24,
     val lastCompletedMillis: Long? = null,

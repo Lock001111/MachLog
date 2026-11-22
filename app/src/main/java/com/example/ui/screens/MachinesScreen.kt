@@ -84,6 +84,7 @@ import com.example.ui.components.CadencePill
 import com.example.ui.components.EmptyStateCard
 import com.example.ui.components.GroupBadge
 import com.example.ui.components.MachineStatusBadge
+import com.example.ui.components.PriorityPill
 import com.example.ui.components.SeverityPill
 import com.example.ui.components.StatusPill
 import com.example.ui.components.TaskOutcomePill
@@ -703,6 +704,7 @@ private fun MachineDetailPane(
                             modifier = Modifier.weight(1f)
                         ) {
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                PriorityPill(task.priority)
                                 CadencePill(task.cadence)
                                 StatusPill(
                                     text = Formatters.formatRelativeDeadline(task.deadlineMillis, now),

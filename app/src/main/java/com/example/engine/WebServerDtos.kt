@@ -35,6 +35,9 @@ data class WebEngineerDto(
 data class WebStateResponse(
     val nowMillis: Long,
     val defaultEngineerName: String,
+    val appVersionName: String = "1.0",
+    val appVersionCode: Int = 1,
+    val githubRepo: String = "Lock001111/MachLog",
     val groups: List<WebGroupDto>,
     val machines: List<WebMachineDto>,
     val tasks: List<WebTaskDto>,
@@ -79,6 +82,7 @@ data class WebTaskDto(
     val estimatedMinutes: Int,
     val personInCharge: String,
     val assistantEngineers: String,
+    val priority: String = "NORMAL",
     val reminderEnabled: Boolean,
     val reminderLeadHours: Int,
     val lastCompletedMillis: Long?
@@ -183,6 +187,7 @@ data class WebSaveTaskReq(
     val estimatedMinutes: Int = 30,
     val personInCharge: String = "",
     val assistantEngineers: String = "",
+    val priority: String = "NORMAL",
     val reminderEnabled: Boolean = true,
     val reminderLeadHours: Int = 24
 )

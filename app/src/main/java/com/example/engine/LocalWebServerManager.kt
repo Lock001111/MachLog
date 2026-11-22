@@ -1,6 +1,7 @@
 package com.example.engine
 
 import android.content.Context
+import com.example.BuildConfig
 import com.example.data.AppPreferences
 import com.example.data.Cadence
 import com.example.data.CustomGroupEntity
@@ -333,6 +334,9 @@ object LocalWebServerManager {
                         WebStateResponse(
                             nowMillis = System.currentTimeMillis(),
                             defaultEngineerName = snapshot.defaultEngineerName,
+                            appVersionName = BuildConfig.VERSION_NAME,
+                            appVersionCode = BuildConfig.VERSION_CODE,
+                            githubRepo = AppUpdateChecker.GITHUB_REPO,
                             groups = groups.map {
                                 WebGroupDto(it.id, it.uuid, it.name, it.scope.name, it.colorKey)
                             },
@@ -340,7 +344,7 @@ object LocalWebServerManager {
                                 WebMachineDto(it.id, it.uuid, it.groupId, it.assetCode, it.name, it.locationZone, it.modelInfo, it.status.name, it.notes)
                             },
                             tasks = tasks.map {
-                                WebTaskDto(it.id, it.uuid, it.machineId, it.groupId, it.title, it.description, it.cadence.name, it.deadlineMillis, it.estimatedMinutes, it.personInCharge, it.assistantEngineers, it.reminderEnabled, it.reminderLeadHours, it.lastCompletedMillis)
+                                WebTaskDto(it.id, it.uuid, it.machineId, it.groupId, it.title, it.description, it.cadence.name, it.deadlineMillis, it.estimatedMinutes, it.personInCharge, it.assistantEngineers, it.priority.name, it.reminderEnabled, it.reminderLeadHours, it.lastCompletedMillis)
                             },
                             todos = todos.map {
                                 WebTodoDto(it.id, it.uuid, it.title, it.notes, it.machineId, it.groupId, it.personInCharge, it.repeatRule.name, it.dueAtMillis, it.reminderEnabled, it.isCompleted, it.priority.name, it.completedAtMillis)
@@ -493,6 +497,7 @@ object LocalWebServerManager {
                     val body = decodeJson<WebSaveTaskReq>(req.body) ?: return badRequest()
                     val existing = if (body.id != 0L) dao.getTaskById(body.id) else null
                     val cadence = runCatching { Cadence.valueOf(body.cadence) }.getOrDefault(Cadence.ONCE)
+                    val prio = runCatching { ReminderPriority.valueOf(body.priority) }.getOrDefault(ReminderPriority.NORMAL)
                     repo.saveTask(
                         MaintenanceTaskEntity(
                             id = existing?.id ?: 0L,
@@ -506,6 +511,7 @@ object LocalWebServerManager {
                             estimatedMinutes = body.estimatedMinutes.coerceAtLeast(1),
                             personInCharge = body.personInCharge.trim(),
                             assistantEngineers = body.assistantEngineers.trim(),
+                            priority = prio,
                             reminderEnabled = body.reminderEnabled,
                             reminderLeadHours = body.reminderLeadHours.coerceAtLeast(1),
                             lastCompletedMillis = existing?.lastCompletedMillis

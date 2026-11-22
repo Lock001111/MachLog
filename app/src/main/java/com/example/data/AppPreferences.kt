@@ -25,7 +25,11 @@ data class UserPreferences(
     val defaultEngineerName: String = "Elena Vance",
     val pcWebEnabled: Boolean = false,
     val pcWebPinEnabled: Boolean = false,
-    val pcWebPin: String = "4821"
+    val pcWebPin: String = "4821",
+    val todoPageSize: Int = 25,
+    val autoCheckUpdates: Boolean = true,
+    val lastUpdateCheckMillis: Long? = null,
+    val latestKnownVersion: String? = null
 )
 
 class AppPreferences(private val context: Context) {
@@ -41,11 +45,17 @@ class AppPreferences(private val context: Context) {
         val PC_WEB_ENABLED = booleanPreferencesKey("pc_web_enabled")
         val PC_WEB_PIN_ENABLED = booleanPreferencesKey("pc_web_pin_enabled")
         val PC_WEB_PIN = stringPreferencesKey("pc_web_pin")
+        val TODO_PAGE_SIZE = intPreferencesKey("todo_page_size")
+        val AUTO_CHECK_UPDATES = booleanPreferencesKey("auto_check_updates")
+        val LAST_UPDATE_CHECK_MILLIS = longPreferencesKey("last_update_check_millis")
+        val LATEST_KNOWN_VERSION = stringPreferencesKey("latest_known_version")
     }
 
     val preferencesFlow: Flow<UserPreferences> = context.dataStore.data.map { prefs ->
         val freqStr = prefs[Keys.AUTO_BACKUP_FREQUENCY] ?: AutoBackupFrequency.OFF.name
         val freq = runCatching { AutoBackupFrequency.valueOf(freqStr) }.getOrDefault(AutoBackupFrequency.OFF)
+        val rawPageSize = prefs[Keys.TODO_PAGE_SIZE] ?: 25
+        val pageSize = if (rawPageSize in setOf(25, 50, 100)) rawPageSize else 25
         UserPreferences(
             notificationsEnabled = prefs[Keys.NOTIFICATIONS_ENABLED] ?: true,
             reminderLeadHours = prefs[Keys.REMINDER_LEAD_HOURS] ?: 24,
@@ -56,7 +66,11 @@ class AppPreferences(private val context: Context) {
             defaultEngineerName = prefs[Keys.DEFAULT_ENGINEER_NAME] ?: "Elena Vance",
             pcWebEnabled = prefs[Keys.PC_WEB_ENABLED] ?: false,
             pcWebPinEnabled = prefs[Keys.PC_WEB_PIN_ENABLED] ?: false,
-            pcWebPin = prefs[Keys.PC_WEB_PIN] ?: "4821"
+            pcWebPin = prefs[Keys.PC_WEB_PIN] ?: "4821",
+            todoPageSize = pageSize,
+            autoCheckUpdates = prefs[Keys.AUTO_CHECK_UPDATES] ?: true,
+            lastUpdateCheckMillis = prefs[Keys.LAST_UPDATE_CHECK_MILLIS],
+            latestKnownVersion = prefs[Keys.LATEST_KNOWN_VERSION]
         )
     }
 
@@ -106,5 +120,23 @@ class AppPreferences(private val context: Context) {
 
     suspend fun setPcWebPin(pin: String) {
         context.dataStore.edit { it[Keys.PC_WEB_PIN] = pin.filter { c -> c.isDigit() }.take(6).ifEmpty { "4821" } }
+    }
+
+    suspend fun setTodoPageSize(size: Int) {
+        val valid = if (size in setOf(25, 50, 100)) size else 25
+        context.dataStore.edit { it[Keys.TODO_PAGE_SIZE] = valid }
+    }
+
+    suspend fun setAutoCheckUpdates(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.AUTO_CHECK_UPDATES] = enabled }
+    }
+
+    suspend fun recordUpdateCheck(millis: Long, latestTag: String?) {
+        context.dataStore.edit {
+            it[Keys.LAST_UPDATE_CHECK_MILLIS] = millis
+            if (!latestTag.isNullOrBlank()) {
+                it[Keys.LATEST_KNOWN_VERSION] = latestTag
+            }
+        }
     }
 }

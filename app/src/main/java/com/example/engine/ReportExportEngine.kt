@@ -145,6 +145,7 @@ object ReportExportEngine {
                 CellValue.Text("Machine"),
                 CellValue.Text("Custom Group"),
                 CellValue.Text("Task Title"),
+                CellValue.Text("Priority"),
                 CellValue.Text("Cadence"),
                 CellValue.Text("Deadline"),
                 CellValue.Text("Status"),
@@ -163,6 +164,7 @@ object ReportExportEngine {
                 CellValue.Text(m?.name ?: "Unknown"),
                 CellValue.Text(g),
                 CellValue.Text(t.title),
+                CellValue.Text(t.priority.label),
                 CellValue.Text(t.cadence.label),
                 CellValue.Text(Formatters.formatIsoDateTime(t.deadlineMillis)),
                 CellValue.Text(status),
@@ -404,7 +406,7 @@ object ReportExportEngine {
                     val state = if (t.deadlineMillis < System.currentTimeMillis()) "OVERDUE" else "DUE"
                     val asstStr = if (t.assistantEngineers.isNotBlank()) " (+ ${t.assistantEngineers})" else ""
                     canvas.drawText(
-                        "[${t.cadence.label.uppercase()}] ${t.title} — ${m?.assetCode ?: ""} ${m?.name ?: ""}",
+                        "[${t.priority.label.uppercase()} · ${t.cadence.label.uppercase()}] ${t.title} — ${m?.assetCode ?: ""} ${m?.name ?: ""}",
                         margin,
                         y,
                         boldBodyPaint

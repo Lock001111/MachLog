@@ -75,6 +75,7 @@ import com.example.data.Cadence
 import com.example.data.CustomGroupEntity
 import com.example.data.MachineEntity
 import com.example.data.MaintenanceTaskEntity
+import com.example.data.ReminderPriority
 import com.example.data.TodoReminderEntity
 import com.example.engine.Formatters
 import com.example.ui.MachinaUiState
@@ -85,6 +86,7 @@ import com.example.ui.components.CadencePill
 import com.example.ui.components.EmptyStateCard
 import com.example.ui.components.GroupBadge
 import com.example.ui.components.OverdueAlertBanner
+import com.example.ui.components.PriorityPill
 import com.example.ui.components.StatusPill
 import com.example.ui.theme.LocalMachinaColors
 import java.util.concurrent.TimeUnit
@@ -103,6 +105,7 @@ fun TasksScreen(
     onManageGroups: () -> Unit,
     onImportExcel: () -> Unit,
     onUpdateTodoFilter: ((TodoFilterState) -> TodoFilterState) -> Unit,
+    onSetTodoPageSize: (Int) -> Unit,
     onToggleTodoComplete: (TodoReminderEntity) -> Unit,
     onAddTodo: () -> Unit,
     onEditTodo: (TodoReminderEntity) -> Unit,
@@ -138,6 +141,7 @@ fun TasksScreen(
             1 -> TodoRemindersSubTab(
                 state = state,
                 onUpdateFilter = onUpdateTodoFilter,
+                onSetPageSize = onSetTodoPageSize,
                 onToggleComplete = onToggleTodoComplete,
                 onAddTodo = onAddTodo,
                 onEditTodo = onEditTodo,
@@ -186,10 +190,11 @@ private fun ActiveTasksSubTab(
     }
 
     val filteredTasks = remember(state.tasks, filter, machinesById, now) {
-        state.tasks.filter { task ->
+        val base = state.tasks.filter { task ->
             val machine = machinesById[task.machineId]
             val effectiveGroupId = task.groupId ?: machine?.groupId
             val matchCadence = filter.cadence == null || task.cadence == filter.cadence
+            val matchPriority = filter.priority == null || task.priority == filter.priority
             val matchOverdue = !filter.overdueOnly || task.deadlineMillis < now
             val matchGroup = filter.groupId == null || effectiveGroupId == filter.groupId
             val matchPic = filter.picFilter.isNullOrBlank() ||
@@ -203,7 +208,12 @@ private fun ActiveTasksSubTab(
                 task.assistantEngineers.contains(q, ignoreCase = true) ||
                 (machine?.name?.contains(q, ignoreCase = true) == true) ||
                 (machine?.assetCode?.contains(q, ignoreCase = true) == true)
-            matchCadence && matchOverdue && matchGroup && matchPic && matchQuery
+            matchCadence && matchPriority && matchOverdue && matchGroup && matchPic && matchQuery
+        }
+        if (filter.sortAscending) {
+            base.sortedBy { it.deadlineMillis }
+        } else {
+            base.sortedByDescending { it.deadlineMillis }
         }
     }
 
@@ -360,6 +370,45 @@ private fun ActiveTasksSubTab(
                                 )
                             }
                         }
+                    }
+                }
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                ) {
+                    FilterChip(
+                        selected = true,
+                        onClick = { onUpdateFilter { it.copy(sortAscending = !it.sortAscending) } },
+                        leadingIcon = {
+                            Icon(Icons.Filled.Sort, contentDescription = null, modifier = Modifier.size(16.dp))
+                        },
+                        label = {
+                            Text(if (filter.sortAscending) "Date ↑ Soonest" else "Date ↓ Latest")
+                        },
+                        modifier = Modifier.testTag("task_date_sort_chip")
+                    )
+                    FilterChip(
+                        selected = filter.priority == null,
+                        onClick = { onUpdateFilter { it.copy(priority = null) } },
+                        label = { Text("All Priorities") },
+                        modifier = Modifier.testTag("task_priority_chip_all")
+                    )
+                    ReminderPriority.entries.forEach { prio ->
+                        val pCount = state.tasks.count { it.priority == prio }
+                        FilterChip(
+                            selected = filter.priority == prio,
+                            onClick = {
+                                onUpdateFilter {
+                                    it.copy(priority = if (it.priority == prio) null else prio)
+                                }
+                            },
+                            label = { Text("${prio.label} ($pCount)") },
+                            modifier = Modifier.testTag("task_priority_chip_${prio.name.lowercase()}")
+                        )
                     }
                 }
 
@@ -540,6 +589,7 @@ private fun MaintenanceTaskCard(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
+                    PriorityPill(task.priority)
                     CadencePill(task.cadence)
                     if (machine != null) {
                         StatusPill(

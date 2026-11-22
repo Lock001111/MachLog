@@ -55,6 +55,7 @@ data class ImportedTaskRow(
     val estimatedMinutes: Int,
     val personInCharge: String,
     val assistantEngineers: String = "",
+    val priority: ReminderPriority = ReminderPriority.NORMAL,
     val groupName: String,
     val reminderEnabled: Boolean,
     val reminderLeadHours: Int = 24,
@@ -378,6 +379,7 @@ object ExcelImportEngine {
                         t.estimatedMinutes.coerceAtLeast(1) != ex.estimatedMinutes ||
                         t.personInCharge.trim() != ex.personInCharge.trim() ||
                         t.assistantEngineers.trim() != ex.assistantEngineers.trim() ||
+                        t.priority != ex.priority ||
                         t.reminderEnabled != ex.reminderEnabled ||
                         t.reminderLeadHours != ex.reminderLeadHours
                     if (changed) tUpd++ else tSkip++
@@ -613,6 +615,7 @@ object ExcelImportEngine {
                     estimatedMinutes = t.estimatedMinutes.coerceAtLeast(1),
                     personInCharge = t.personInCharge.trim(),
                     assistantEngineers = t.assistantEngineers.trim(),
+                    priority = t.priority,
                     reminderEnabled = t.reminderEnabled,
                     reminderLeadHours = t.reminderLeadHours.coerceAtLeast(1),
                     updatedAtMillis = now
@@ -632,6 +635,7 @@ object ExcelImportEngine {
                     t.estimatedMinutes.coerceAtLeast(1) != existing.estimatedMinutes ||
                     t.personInCharge.trim() != existing.personInCharge.trim() ||
                     t.assistantEngineers.trim() != existing.assistantEngineers.trim() ||
+                    t.priority != existing.priority ||
                     t.reminderEnabled != existing.reminderEnabled ||
                     t.reminderLeadHours != existing.reminderLeadHours
 
@@ -644,6 +648,7 @@ object ExcelImportEngine {
                         estimatedMinutes = t.estimatedMinutes.coerceAtLeast(1),
                         personInCharge = t.personInCharge.trim(),
                         assistantEngineers = t.assistantEngineers.trim(),
+                        priority = t.priority,
                         reminderEnabled = t.reminderEnabled,
                         reminderLeadHours = t.reminderLeadHours.coerceAtLeast(1),
                         updatedAtMillis = now
@@ -803,9 +808,9 @@ object ExcelImportEngine {
             listOf("MCH-602", "Chiller Unit Carrier 30XA", "Utility Roof", "Carrier 30XA SN-8810", "OPERATIONAL", "Boiler & Cooling", "Glycol 30% mix")
         )
         val taskRows = listOf(
-            listOf("Asset Code", "Task Title", "Description", "Cadence (ONCE / DAILY / WEEKLY / MONTHLY / YEARLY)", "Deadline (yyyy-MM-dd HH:mm)", "Est. Minutes", "Person In Charge", "Assistant Engineers", "Custom Group", "Reminder (YES/NO)", "Reminder Lead Hours"),
-            listOf("MCH-601", "Optics Lens & Nozzle Inspection", "Clean protective glass and inspect copper nozzle tip", "DAILY", "2026-12-01 08:00", "20", "Elena Vance", "Marcus Chen", "Assembly Line B", "YES", "2"),
-            listOf("MCH-602", "Condenser Coil Wash", "Wash fin coils and verify approach temperature", "MONTHLY", "2026-12-15 10:00", "60", "Marcus Chen", "", "Boiler & Cooling", "YES", "48")
+            listOf("Asset Code", "Task Title", "Description", "Cadence (ONCE / DAILY / WEEKLY / MONTHLY / YEARLY)", "Deadline (yyyy-MM-dd HH:mm)", "Est. Minutes", "Person In Charge", "Assistant Engineers", "Priority (NORMAL / HIGH / URGENT)", "Custom Group", "Reminder (YES/NO)", "Reminder Lead Hours"),
+            listOf("MCH-601", "Optics Lens & Nozzle Inspection", "Clean protective glass and inspect copper nozzle tip", "DAILY", "2026-12-01 08:00", "20", "Elena Vance", "Marcus Chen", "HIGH", "Assembly Line B", "YES", "2"),
+            listOf("MCH-602", "Condenser Coil Wash", "Wash fin coils and verify approach temperature", "MONTHLY", "2026-12-15 10:00", "60", "Marcus Chen", "", "NORMAL", "Boiler & Cooling", "YES", "48")
         )
         val todoRows = listOf(
             listOf("Title", "Notes", "Repeat Rule (ONCE / DAILY / WEEKLY / MONTHLY / YEARLY)", "Trigger Date (yyyy-MM-dd HH:mm)", "Priority (NORMAL / HIGH / URGENT)", "Person In Charge", "Asset Code (Optional)"),
@@ -909,6 +914,7 @@ object ExcelImportEngine {
         val estCol = findCol(headers, "est. minutes", "est", "minutes", "time")
         val picCol = findCol(headers, "person in charge", "pic", "engineer", "technician", "assigned")
         val assistantCol = findCol(headers, "assistant", "helpers", "co-engineer")
+        val prioCol = findCol(headers, "priority")
         val groupCol = findCol(headers, "custom group", "group")
         val remCol = findCol(headers, "reminder")
         val leadHoursCol = findCol(headers, "reminder lead hours", "lead hours", "lead time")
@@ -933,6 +939,13 @@ object ExcelImportEngine {
                 else -> Cadence.DAILY
             }
 
+            val prioRaw = row.getOrNull(prioCol)?.trim()?.uppercase().orEmpty()
+            val priority = when {
+                prioRaw.contains("URGENT") || prioRaw.contains("CRITICAL") -> ReminderPriority.URGENT
+                prioRaw.contains("HIGH") -> ReminderPriority.HIGH
+                else -> ReminderPriority.NORMAL
+            }
+
             val parsedDeadline = parseFlexibleDateMillis(row.getOrNull(deadlineCol))
             val estMin = row.getOrNull(estCol)?.trim()?.toDoubleOrNull()?.toInt()?.coerceAtLeast(1) ?: 30
             val pic = row.getOrNull(picCol)?.trim()?.ifEmpty { defaultEngineer } ?: defaultEngineer
@@ -950,6 +963,7 @@ object ExcelImportEngine {
                 estimatedMinutes = estMin,
                 personInCharge = pic,
                 assistantEngineers = assistants,
+                priority = priority,
                 groupName = row.getOrNull(groupCol)?.trim().orEmpty(),
                 reminderEnabled = remOn,
                 reminderLeadHours = leadHours,

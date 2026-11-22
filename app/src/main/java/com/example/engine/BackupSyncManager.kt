@@ -68,6 +68,7 @@ data class TaskBackupDto(
     val estimatedMinutes: Int = 30,
     val personInCharge: String,
     val assistantEngineers: String = "",
+    val priority: String = "NORMAL",
     val reminderEnabled: Boolean = true,
     val reminderLeadHours: Int = 24,
     val lastCompletedMillis: Long? = null,
@@ -216,6 +217,7 @@ object BackupSyncManager {
                     estimatedMinutes = it.estimatedMinutes,
                     personInCharge = it.personInCharge,
                     assistantEngineers = it.assistantEngineers,
+                    priority = it.priority.name,
                     reminderEnabled = it.reminderEnabled,
                     reminderLeadHours = it.reminderLeadHours,
                     lastCompletedMillis = it.lastCompletedMillis,
@@ -400,6 +402,7 @@ object BackupSyncManager {
             val machineId = machineUuidToId[t.machineUuid] ?: continue
             val groupId = t.groupUuid?.let { groupUuidToId[it] }
             val cadence = runCatching { Cadence.valueOf(t.cadence) }.getOrDefault(Cadence.DAILY)
+            val priority = runCatching { ReminderPriority.valueOf(t.priority) }.getOrDefault(ReminderPriority.NORMAL)
             val existing = existingTasks[t.uuid]
             if (existing == null) {
                 val id = dao.insertTask(
@@ -414,6 +417,7 @@ object BackupSyncManager {
                         estimatedMinutes = t.estimatedMinutes,
                         personInCharge = t.personInCharge,
                         assistantEngineers = t.assistantEngineers,
+                        priority = priority,
                         reminderEnabled = t.reminderEnabled,
                         reminderLeadHours = t.reminderLeadHours,
                         lastCompletedMillis = t.lastCompletedMillis,
@@ -433,6 +437,7 @@ object BackupSyncManager {
                         estimatedMinutes = t.estimatedMinutes,
                         personInCharge = t.personInCharge,
                         assistantEngineers = t.assistantEngineers,
+                        priority = priority,
                         reminderEnabled = t.reminderEnabled,
                         reminderLeadHours = t.reminderLeadHours,
                         lastCompletedMillis = t.lastCompletedMillis,

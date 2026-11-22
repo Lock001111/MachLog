@@ -65,10 +65,12 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.BuildConfig
 import com.example.data.AutoBackupFrequency
 import com.example.data.Cadence
 import com.example.data.ServiceEntryType
 import com.example.data.TaskOutcome
+import com.example.engine.AppUpdateInfo
 import com.example.engine.CategoryDiffStats
 import com.example.engine.ExcelImportPreview
 import com.example.engine.ExportFilterParams
@@ -436,7 +438,9 @@ fun SyncBackupSettingsDialog(
     onSaveExcelTemplate: () -> Unit,
     onSetEngineerName: (String) -> Unit,
     onResetSampleData: () -> Unit,
-    onOpenPcWebPortal: () -> Unit
+    onOpenPcWebPortal: () -> Unit,
+    onSetAutoCheckUpdates: (Boolean) -> Unit,
+    onCheckForUpdates: () -> Unit
 ) {
     val context = LocalContext.current
     val hasPermission = NotificationChannels.hasNotificationPermission(context)
@@ -676,9 +680,56 @@ fun SyncBackupSettingsDialog(
                     }
                 }
 
+                // 4. App Updates (GitHub Releases: Lock001111/MachLog)
+                HorizontalDivider()
+                Text("App Updates (GitHub: Lock001111/MachLog)", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                Text(
+                    text = "Installed: v${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Auto-check updates on launch", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = "Detects new APK releases automatically from GitHub",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = state.preferences.autoCheckUpdates,
+                        onCheckedChange = onSetAutoCheckUpdates,
+                        modifier = Modifier.testTag("auto_check_updates_switch")
+                    )
+                }
+                OutlinedButton(
+                    onClick = onCheckForUpdates,
+                    enabled = !state.isCheckingUpdate,
+                    modifier = Modifier.fillMaxWidth().minimumInteractiveComponentSize().testTag("check_for_updates_button")
+                ) {
+                    Icon(Icons.Filled.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (state.isCheckingUpdate) "Checking GitHub Releases..." else "Check for Updates")
+                }
+                state.updateStatusText?.let { statusLine ->
+                    Text(
+                        text = statusLine,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                state.preferences.lastUpdateCheckMillis?.let { checkedAt ->
+                    Text(
+                        text = "Last checked: ${Formatters.formatDateTime(checkedAt)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
                 HorizontalDivider()
 
-                // 4. Default Engineer & Sample Reset
+                // 5. Default Engineer & Sample Reset
                 EngineerPickerField(
                     label = "Default Engineer (PIC)",
                     selectedName = state.preferences.defaultEngineerName,
@@ -1133,6 +1184,96 @@ fun PcWebPortalDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) { Text("Done") }
+        }
+    )
+}
+
+@Composable
+fun AppUpdateAvailableDialog(
+    info: AppUpdateInfo,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val downloadTarget = info.apkDownloadUrl ?: info.htmlUrl
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.CloudDownload,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Text("Update Available: ${info.latestTag}")
+            }
+        },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .heightIn(max = 380.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                        modifier = Modifier.padding(10.dp)
+                    ) {
+                        Text(
+                            text = "Installed: v${info.currentVersionName} -> Latest: ${info.latestTag}",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        if (info.versionLabel.isNotBlank()) {
+                            Text(
+                                text = info.versionLabel,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                }
+                if (info.releaseNotes.isNotBlank()) {
+                    Text(
+                        text = info.releaseNotes,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Text(
+                    text = if (info.apkDownloadUrl != null) {
+                        "Tap Update Now to download the signed APK directly from Lock001111/MachLog."
+                    } else {
+                        "Tap Update Now to open the Lock001111/MachLog GitHub Release page."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(downloadTarget)))
+                    }
+                    onDismiss()
+                },
+                modifier = Modifier.testTag("confirm_app_update_button")
+            ) {
+                Text("Update Now")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Later") }
         }
     )
 }

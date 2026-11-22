@@ -56,9 +56,12 @@ import com.example.ui.components.StatusPill
 
 fun filterWarehouseParts(
     parts: List<WarehousePartEntity>,
-    query: String
+    query: String,
+    minQueryLength: Int = 0
 ): List<WarehousePartEntity> {
-    val tokens = query.trim().lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
+    val cleanQuery = query.trim()
+    if (minQueryLength > 0 && cleanQuery.length < minQueryLength) return emptyList()
+    val tokens = cleanQuery.lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
     if (tokens.isEmpty()) return parts
     return parts.filter { part ->
         val haystack = "${part.partCode} ${part.partName} ${part.partDescription}".lowercase()

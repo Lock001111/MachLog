@@ -205,6 +205,7 @@ class MaintenanceRepository(
                     estimatedMinutes = task.estimatedMinutes,
                     personInCharge = finalPic,
                     assistantEngineers = finalAssistants,
+                    priority = task.priority,
                     reminderEnabled = task.reminderEnabled,
                     reminderLeadHours = task.reminderLeadHours,
                     lastCompletedMillis = now,
@@ -283,6 +284,7 @@ class MaintenanceRepository(
                     estimatedMinutes = task.estimatedMinutes,
                     personInCharge = finalPic,
                     assistantEngineers = finalAssistants,
+                    priority = task.priority,
                     reminderEnabled = task.reminderEnabled,
                     reminderLeadHours = task.reminderLeadHours,
                     lastCompletedMillis = task.lastCompletedMillis,
@@ -307,29 +309,49 @@ class MaintenanceRepository(
     suspend fun toggleTodoComplete(todoId: Long) {
         val todo = dao.getTodoById(todoId) ?: return
         val now = System.currentTimeMillis()
-        if (todo.repeatRule == RepeatRule.ONCE) {
-            val newDone = !todo.isCompleted
-            dao.updateTodo(
-                todo.copy(
-                    isCompleted = newDone,
-                    completedAtMillis = if (newDone) now else null,
-                    updatedAtMillis = now
+        when {
+            todo.isCompleted -> {
+                dao.updateTodo(
+                    todo.copy(
+                        isCompleted = false,
+                        completedAtMillis = null,
+                        updatedAtMillis = now
+                    )
                 )
-            )
-        } else {
-            val nextDue = computeNextRepeatMillis(
-                baseAnchorMillis = todo.dueAtMillis,
-                nowMillis = now,
-                rule = todo.repeatRule
-            )
-            dao.updateTodo(
-                todo.copy(
-                    dueAtMillis = nextDue,
-                    isCompleted = false,
-                    completedAtMillis = now,
-                    updatedAtMillis = now
+            }
+            todo.repeatRule == RepeatRule.ONCE -> {
+                dao.updateTodo(
+                    todo.copy(
+                        isCompleted = true,
+                        completedAtMillis = now,
+                        updatedAtMillis = now
+                    )
                 )
-            )
+            }
+            else -> {
+                dao.updateTodo(
+                    todo.copy(
+                        isCompleted = true,
+                        completedAtMillis = now,
+                        updatedAtMillis = now
+                    )
+                )
+                val nextDue = computeNextRepeatMillis(
+                    baseAnchorMillis = todo.dueAtMillis,
+                    nowMillis = now,
+                    rule = todo.repeatRule
+                )
+                dao.insertTodo(
+                    todo.copy(
+                        id = 0L,
+                        uuid = UUID.randomUUID().toString(),
+                        dueAtMillis = nextDue,
+                        isCompleted = false,
+                        completedAtMillis = null,
+                        updatedAtMillis = now
+                    )
+                )
+            }
         }
     }
 
