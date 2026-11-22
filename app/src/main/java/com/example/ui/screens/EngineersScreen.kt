@@ -27,13 +27,12 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Engineering
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -65,15 +64,18 @@ import androidx.compose.ui.unit.dp
 import com.example.data.EngineerEntity
 import com.example.data.MachineEntity
 import com.example.data.MaintenanceTaskEntity
+import com.example.data.ServiceLogWithParts
 import com.example.data.TaskOutcome
 import com.example.data.parseEngineerList
 import com.example.engine.Formatters
 import com.example.ui.MachinaUiState
 import com.example.ui.components.CadencePill
+import com.example.ui.components.CompactSearchField
 import com.example.ui.components.EmptyStateCard
 import com.example.ui.components.KpiMetricCard
 import com.example.ui.components.PriorityPill
 import com.example.ui.components.StatusPill
+import com.example.ui.components.TaskOutcomePill
 import com.example.ui.theme.LocalMachinaColors
 
 @Composable
@@ -86,10 +88,12 @@ fun EngineersScreen(
     onRejectTask: (MaintenanceTaskEntity) -> Unit,
     onEditTask: (MaintenanceTaskEntity) -> Unit,
     onViewEngineerTasksInTab: (String) -> Unit,
+    onViewEngineerHistoryInTab: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var inspectingEngineerId by remember { mutableStateOf<Long?>(null) }
+    var inspectingHistoryEngineerId by remember { mutableStateOf<Long?>(null) }
     val sem = LocalMachinaColors.current
     val machinesById = remember(state.machines) { state.machines.associateBy { it.id } }
 
@@ -144,23 +148,13 @@ fun EngineersScreen(
         }
 
         item(key = "engineers_search") {
-            OutlinedTextField(
+            CompactSearchField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                placeholder = { Text("Search engineer name, badge ID, role, shift...") },
-                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Search engineers") },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Filled.Clear, contentDescription = "Clear search")
-                        }
-                    }
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("engineers_search_input")
+                placeholder = "Search engineer name, badge ID, role, shift...",
+                searchTag = "engineers_search_input",
+                contentDescription = "Search engineers",
+                modifier = Modifier.fillMaxWidth()
             )
         }
 
@@ -190,6 +184,7 @@ fun EngineersScreen(
                     activeCount = activePicCount,
                     historyCount = historyCount,
                     onInspectActiveTasks = { inspectingEngineerId = engineer.id },
+                    onInspectHistoryTasks = { inspectingHistoryEngineerId = engineer.id },
                     onEdit = { onEditEngineer(engineer) },
                     onDelete = { onDeleteEngineer(engineer) }
                 )
@@ -223,6 +218,28 @@ fun EngineersScreen(
             }
         )
     }
+
+    val inspectingHistoryEngineer = inspectingHistoryEngineerId?.let { id -> state.engineers.find { it.id == id } }
+    if (inspectingHistoryEngineer != null) {
+        val historicalLogs = remember(state.serviceLogs, inspectingHistoryEngineer.name) {
+            state.serviceLogs.filter { entry ->
+                entry.log.personInCharge.equals(inspectingHistoryEngineer.name, ignoreCase = true) ||
+                    parseEngineerList(entry.log.assistantEngineers).any {
+                        it.equals(inspectingHistoryEngineer.name, ignoreCase = true)
+                    }
+            }.sortedByDescending { it.log.completedAtMillis }
+        }
+        EngineerHistoryTasksDialog(
+            engineer = inspectingHistoryEngineer,
+            logs = historicalLogs,
+            machinesById = machinesById,
+            onDismiss = { inspectingHistoryEngineerId = null },
+            onViewInHistoryTab = {
+                inspectingHistoryEngineerId = null
+                onViewEngineerHistoryInTab(inspectingHistoryEngineer.name)
+            }
+        )
+    }
 }
 
 @Composable
@@ -231,6 +248,7 @@ private fun EngineerCard(
     activeCount: Int,
     historyCount: Int,
     onInspectActiveTasks: () -> Unit,
+    onInspectHistoryTasks: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -335,11 +353,44 @@ private fun EngineerCard(
                             )
                         }
                     }
-                    StatusPill(
-                        text = "$historyCount Logged",
-                        containerColor = sem.operationalContainer,
-                        contentColor = sem.operational
-                    )
+                    Surface(
+                        onClick = onInspectHistoryTasks,
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (historyCount > 0) sem.operationalContainer else MaterialTheme.colorScheme.surfaceVariant,
+                        border = BorderStroke(
+                            width = 1.dp,
+                            color = if (historyCount > 0) sem.operational.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outlineVariant
+                        ),
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("engineer_history_tasks_button_${engineer.id}")
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.History,
+                                contentDescription = null,
+                                tint = if (historyCount > 0) sem.operational else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = "$historyCount Logged",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (historyCount > 0) sem.operational else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.width(2.dp))
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = "View historical tasks",
+                                tint = if (historyCount > 0) sem.operational else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
                 }
             }
 
@@ -499,6 +550,137 @@ private fun EngineerActiveTasksDialog(
         },
         dismissButton = {
             if (tasks.isNotEmpty()) {
+                TextButton(onClick = onDismiss) { Text("Close") }
+            }
+        }
+    )
+}
+
+@Composable
+private fun EngineerHistoryTasksDialog(
+    engineer: EngineerEntity,
+    logs: List<ServiceLogWithParts>,
+    machinesById: Map<Long, MachineEntity>,
+    onDismiss: () -> Unit,
+    onViewInHistoryTab: () -> Unit
+) {
+    val sem = LocalMachinaColors.current
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text("${engineer.name} · History (${logs.size})")
+                Text(
+                    text = "${engineer.role} · ${engineer.shift}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier
+                    .heightIn(max = 460.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                if (logs.isEmpty()) {
+                    Text(
+                        text = "No completed or rejected tasks recorded yet for ${engineer.name}.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    logs.forEach { entry ->
+                        val log = entry.log
+                        val machine = machinesById[log.machineId]
+                        val isPic = log.personInCharge.equals(engineer.name, ignoreCase = true)
+                        val isRejected = log.outcome == TaskOutcome.REJECTED
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+                            border = BorderStroke(
+                                width = 1.dp,
+                                color = if (isRejected) sem.critical.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outlineVariant
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("engineer_modal_history_${log.id}")
+                        ) {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(5.dp),
+                                modifier = Modifier.padding(10.dp)
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                                ) {
+                                    TaskOutcomePill(log.outcome)
+                                    log.prioritySnapshot?.let { PriorityPill(it) }
+                                    log.cadenceSnapshot?.let { CadencePill(it) }
+                                    StatusPill(
+                                        text = if (isPic) "PIC" else "Assistant",
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                                Text(log.summaryTitle, style = MaterialTheme.typography.titleSmall)
+                                if (machine != null) {
+                                    Text(
+                                        text = "${machine.assetCode} · ${machine.name}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Text(
+                                    text = "Created: ${Formatters.formatDateTime(log.createdAtMillis)} · Recorded: ${Formatters.formatDateTime(log.completedAtMillis)}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (isRejected && log.rejectionReason.isNotBlank()) {
+                                    Text(
+                                        text = "Rejection reason: ${log.rejectionReason}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = sem.critical
+                                    )
+                                } else if (log.malfunctionDetails.isNotBlank()) {
+                                    Text(
+                                        text = log.malfunctionDetails,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                if (entry.parts.isNotEmpty()) {
+                                    Text(
+                                        text = "Parts: " + entry.parts.joinToString(", ") {
+                                            "${if (it.partCode.isNotBlank()) "[${it.partCode}] " else ""}${it.partName} ×${it.quantity} ${it.unit}"
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (logs.isNotEmpty()) {
+                Button(
+                    onClick = onViewInHistoryTab,
+                    modifier = Modifier.testTag("engineer_filter_in_history_button")
+                ) {
+                    Text("Filter in History Tab")
+                }
+            } else {
+                TextButton(onClick = onDismiss) { Text("Close") }
+            }
+        },
+        dismissButton = {
+            if (logs.isNotEmpty()) {
                 TextButton(onClick = onDismiss) { Text("Close") }
             }
         }

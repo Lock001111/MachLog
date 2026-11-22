@@ -26,7 +26,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -36,7 +35,6 @@ import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.TableView
 import androidx.compose.material.icons.filled.TaskAlt
@@ -49,10 +47,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
@@ -78,11 +74,13 @@ import com.example.data.MaintenanceTaskEntity
 import com.example.data.ReminderPriority
 import com.example.data.TodoReminderEntity
 import com.example.engine.Formatters
+import com.example.ui.HistoryFilterState
 import com.example.ui.MachinaUiState
 import com.example.ui.TaskGroupBy
 import com.example.ui.TasksFilterState
 import com.example.ui.TodoFilterState
 import com.example.ui.components.CadencePill
+import com.example.ui.components.CompactSearchField
 import com.example.ui.components.EmptyStateCard
 import com.example.ui.components.GroupBadge
 import com.example.ui.components.OverdueAlertBanner
@@ -110,10 +108,13 @@ fun TasksScreen(
     onAddTodo: () -> Unit,
     onEditTodo: (TodoReminderEntity) -> Unit,
     onDeleteTodo: (TodoReminderEntity) -> Unit,
+    onUpdateHistoryFilter: ((HistoryFilterState) -> HistoryFilterState) -> Unit,
     onDeleteLog: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val openTodoCount = remember(state.todos) { state.todos.count { !it.isCompleted } }
+    val openTodoCount = remember(state.todos, state.tasks) {
+        state.todos.count { !it.isCompleted } + state.tasks.count { it.reminderEnabled }
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         PrimaryTabRow(selectedTabIndex = selectedSubTab.coerceIn(0, 2)) {
@@ -146,10 +147,14 @@ fun TasksScreen(
                 onAddTodo = onAddTodo,
                 onEditTodo = onEditTodo,
                 onDeleteTodo = onDeleteTodo,
+                onCompleteTask = onCompleteTask,
+                onEditTask = onEditTask,
+                onRejectTask = onRejectTask,
                 modifier = Modifier.weight(1f)
             )
             2 -> TaskHistorySubTab(
                 state = state,
+                onUpdateFilter = onUpdateHistoryFilter,
                 onDeleteLog = onDeleteLog,
                 modifier = Modifier.weight(1f)
             )
@@ -266,23 +271,13 @@ private fun ActiveTasksSubTab(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    OutlinedTextField(
+                    CompactSearchField(
                         value = filter.searchQuery,
                         onValueChange = { q -> onUpdateFilter { it.copy(searchQuery = q) } },
-                        placeholder = { Text("Search machine, task, or PIC...") },
-                        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Search tasks") },
-                        trailingIcon = {
-                            if (filter.searchQuery.isNotEmpty()) {
-                                IconButton(onClick = { onUpdateFilter { it.copy(searchQuery = "") } }) {
-                                    Icon(Icons.Filled.Clear, contentDescription = "Clear search")
-                                }
-                            }
-                        },
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("tasks_search_input")
+                        placeholder = "Search machine, task, or PIC...",
+                        searchTag = "tasks_search_input",
+                        contentDescription = "Search tasks",
+                        modifier = Modifier.weight(1f)
                     )
 
                     Box {
@@ -645,6 +640,11 @@ private fun MaintenanceTaskCard(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
+                    Text(
+                        text = "Created: ${Formatters.formatDateTime(task.createdAtMillis)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
                 Row(

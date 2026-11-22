@@ -22,6 +22,7 @@ import com.example.data.RepeatRule
 import com.example.data.ServiceLogWithParts
 import com.example.data.Severity
 import com.example.data.SparePartDraft
+import com.example.data.TaskOutcome
 import com.example.data.TodoReminderEntity
 import com.example.data.UserPreferences
 import com.example.data.WarehousePartEntity
@@ -83,9 +84,23 @@ data class TasksFilterState(
 
 data class TodoFilterState(
     val repeatRule: RepeatRule? = null,
+    val priority: ReminderPriority? = null,
+    val groupId: Long? = null,
+    val picFilter: String? = null,
     val showCompleted: Boolean = false,
     val searchQuery: String = "",
+    val sortAscending: Boolean = true,
     val currentPage: Int = 0
+)
+
+data class HistoryFilterState(
+    val outcome: TaskOutcome? = null,
+    val priority: ReminderPriority? = null,
+    val cadence: Cadence? = null,
+    val groupId: Long? = null,
+    val picFilter: String? = null,
+    val searchQuery: String = "",
+    val sortAscending: Boolean = false
 )
 
 data class MachineFilterState(
@@ -101,6 +116,14 @@ data class UpdateUiBundle(
     val updateStatusText: String? = null
 )
 
+private data class FilterUiBundle(
+    val tasks: TasksFilterState,
+    val todo: TodoFilterState,
+    val history: HistoryFilterState,
+    val machine: MachineFilterState,
+    val report: ExportFilterParams
+)
+
 data class MachinaUiState(
     val groups: List<CustomGroupEntity> = emptyList(),
     val machines: List<MachineEntity> = emptyList(),
@@ -110,6 +133,7 @@ data class MachinaUiState(
     val preferences: UserPreferences = UserPreferences(),
     val tasksFilter: TasksFilterState = TasksFilterState(),
     val todoFilter: TodoFilterState = TodoFilterState(),
+    val historyFilter: HistoryFilterState = HistoryFilterState(),
     val machineFilter: MachineFilterState = MachineFilterState(),
     val reportFilter: ExportFilterParams = ExportFilterParams(),
     val selectedMachineId: Long? = null,
@@ -145,8 +169,18 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
 
     private val _tasksFilter = MutableStateFlow(TasksFilterState())
     private val _todoFilter = MutableStateFlow(TodoFilterState())
+    private val _historyFilter = MutableStateFlow(HistoryFilterState())
     private val _machineFilter = MutableStateFlow(MachineFilterState())
     private val _reportFilter = MutableStateFlow(ExportFilterParams())
+    private val _filterBundleFlow = combine(
+        _tasksFilter,
+        _todoFilter,
+        _historyFilter,
+        _machineFilter,
+        _reportFilter
+    ) { tasks, todo, history, machine, report ->
+        FilterUiBundle(tasks, todo, history, machine, report)
+    }
     private val _selectedMachineId = MutableStateFlow<Long?>(null)
     private val _localBackups = MutableStateFlow<List<File>>(emptyList())
     private val _pendingImportPreview = MutableStateFlow<PortableBackupPackage?>(null)
@@ -169,10 +203,7 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
         repo.todosFlow,
         repo.serviceLogsFlow,
         repo.preferencesFlow,
-        _tasksFilter,
-        _todoFilter,
-        _machineFilter,
-        _reportFilter,
+        _filterBundleFlow,
         _selectedMachineId,
         _localBackups,
         _pendingImportPreview,
@@ -194,22 +225,19 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
         @Suppress("UNCHECKED_CAST")
         val logs = values[4] as List<ServiceLogWithParts>
         val userPrefs = values[5] as UserPreferences
-        val tFilter = values[6] as TasksFilterState
-        val tdFilter = values[7] as TodoFilterState
-        val mFilter = values[8] as MachineFilterState
-        val rFilter = values[9] as ExportFilterParams
-        val selMachine = values[10] as Long?
+        val filters = values[6] as FilterUiBundle
+        val selMachine = values[7] as Long?
         @Suppress("UNCHECKED_CAST")
-        val backups = values[11] as List<File>
-        val importPreview = values[12] as PortableBackupPackage?
-        val excelPreview = values[13] as ExcelImportPreview?
-        val busy = values[14] as Boolean
+        val backups = values[8] as List<File>
+        val importPreview = values[9] as PortableBackupPackage?
+        val excelPreview = values[10] as ExcelImportPreview?
+        val busy = values[11] as Boolean
         @Suppress("UNCHECKED_CAST")
-        val warehouseCatalog = values[15] as List<WarehousePartEntity>
-        val webStatus = values[16] as WebPortalStatus
+        val warehouseCatalog = values[12] as List<WarehousePartEntity>
+        val webStatus = values[13] as WebPortalStatus
         @Suppress("UNCHECKED_CAST")
-        val engineersList = values[17] as List<EngineerEntity>
-        val updateBundle = values[18] as UpdateUiBundle
+        val engineersList = values[14] as List<EngineerEntity>
+        val updateBundle = values[15] as UpdateUiBundle
 
         val resolvedSelectedId = if (selMachine != null && machines.any { it.id == selMachine }) {
             selMachine
@@ -224,10 +252,11 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
             todos = todos,
             serviceLogs = logs,
             preferences = userPrefs,
-            tasksFilter = tFilter,
-            todoFilter = tdFilter,
-            machineFilter = mFilter,
-            reportFilter = rFilter,
+            tasksFilter = filters.tasks,
+            todoFilter = filters.todo,
+            historyFilter = filters.history,
+            machineFilter = filters.machine,
+            reportFilter = filters.report,
             selectedMachineId = resolvedSelectedId,
             localBackups = backups,
             pendingImportPreview = importPreview,
@@ -330,6 +359,14 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
 
     fun updateTodoFilter(transform: (TodoFilterState) -> TodoFilterState) {
         _todoFilter.value = transform(_todoFilter.value)
+    }
+
+    fun updateHistoryFilter(transform: (HistoryFilterState) -> HistoryFilterState) {
+        _historyFilter.value = transform(_historyFilter.value)
+    }
+
+    fun focusEngineerHistory(engineerName: String) {
+        _historyFilter.value = HistoryFilterState(picFilter = engineerName)
     }
 
     fun setTodoPageSize(size: Int) {
@@ -487,9 +524,14 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
         assistantEngineers: String,
         reminderEnabled: Boolean,
         reminderLeadHours: Int,
-        lastCompletedMillis: Long?
+        lastCompletedMillis: Long?,
+        machineStatus: MachineStatus? = null
     ) {
         viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val existingCreatedAt = if (id != 0L) {
+                uiState.value.tasks.find { it.id == id }?.createdAtMillis
+            } else null
             val entity = if (id == 0L || uuid == null) {
                 MaintenanceTaskEntity(
                     machineId = machineId,
@@ -503,7 +545,8 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
                     personInCharge = personInCharge.trim(),
                     assistantEngineers = assistantEngineers.trim(),
                     reminderEnabled = reminderEnabled,
-                    reminderLeadHours = reminderLeadHours.coerceAtLeast(1)
+                    reminderLeadHours = reminderLeadHours.coerceAtLeast(1),
+                    createdAtMillis = now
                 )
             } else {
                 MaintenanceTaskEntity(
@@ -521,10 +564,11 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
                     assistantEngineers = assistantEngineers.trim(),
                     reminderEnabled = reminderEnabled,
                     reminderLeadHours = reminderLeadHours.coerceAtLeast(1),
-                    lastCompletedMillis = lastCompletedMillis
+                    lastCompletedMillis = lastCompletedMillis,
+                    createdAtMillis = existingCreatedAt ?: now
                 )
             }
-            repo.saveTask(entity)
+            repo.saveTask(entity, machineStatus)
             MaintenanceReminderScheduler.triggerImmediateReminderCheck(getApplication())
             _events.emit(UiEvent.Snackbar("Task \"${entity.title}\" saved"))
         }
@@ -544,8 +588,8 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
         actualDurationMinutes: Int,
         notes: String,
         spareParts: List<SparePartDraft>,
-        flagMalfunction: Boolean,
-        malfunctionSeverity: Severity
+        flagMalfunction: Boolean = false,
+        malfunctionSeverity: Severity = Severity.LOW
     ) {
         viewModelScope.launch {
             val task = uiState.value.tasks.find { it.id == taskId }
@@ -652,6 +696,10 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
         completedAtMillis: Long?
     ) {
         viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val existingCreatedAt = if (id != 0L) {
+                uiState.value.todos.find { it.id == id }?.createdAtMillis
+            } else null
             val entity = if (id == 0L || uuid == null) {
                 TodoReminderEntity(
                     title = title.trim(),
@@ -662,7 +710,8 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
                     repeatRule = repeatRule,
                     dueAtMillis = dueAtMillis,
                     reminderEnabled = reminderEnabled,
-                    priority = priority
+                    priority = priority,
+                    createdAtMillis = now
                 )
             } else {
                 TodoReminderEntity(
@@ -678,7 +727,8 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
                     reminderEnabled = reminderEnabled,
                     isCompleted = isCompleted,
                     priority = priority,
-                    completedAtMillis = completedAtMillis
+                    completedAtMillis = completedAtMillis,
+                    createdAtMillis = existingCreatedAt ?: now
                 )
             }
             repo.saveTodo(entity)

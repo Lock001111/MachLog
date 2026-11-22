@@ -1,8 +1,10 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -23,7 +25,6 @@ import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Checklist
-import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Groups
@@ -31,18 +32,20 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Repeat
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -57,17 +60,23 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.data.Cadence
 import com.example.data.CustomGroupEntity
 import com.example.data.MachineEntity
+import com.example.data.MaintenanceTaskEntity
+import com.example.data.ReminderPriority
 import com.example.data.RepeatRule
 import com.example.data.ServiceEntryType
 import com.example.data.ServiceLogWithParts
 import com.example.data.TaskOutcome
 import com.example.data.TodoReminderEntity
+import com.example.data.parseEngineerList
 import com.example.engine.Formatters
+import com.example.ui.HistoryFilterState
 import com.example.ui.MachinaUiState
 import com.example.ui.TodoFilterState
 import com.example.ui.components.CadencePill
+import com.example.ui.components.CompactSearchField
 import com.example.ui.components.EmptyStateCard
 import com.example.ui.components.GroupBadge
 import com.example.ui.components.KpiMetricCard
@@ -77,6 +86,7 @@ import com.example.ui.components.SeverityPill
 import com.example.ui.components.StatusPill
 import com.example.ui.components.TaskOutcomePill
 import com.example.ui.theme.LocalMachinaColors
+import java.util.concurrent.TimeUnit
 
 data class PagedResult<T>(
     val items: List<T>,
@@ -107,6 +117,149 @@ fun <T> paginateItems(items: List<T>, pageIndex: Int, pageSize: Int): PagedResul
     )
 }
 
+sealed class TodoFeedItem {
+    abstract val stableKey: String
+    abstract val title: String
+    abstract val subtitle: String
+    abstract val priority: ReminderPriority
+    abstract val machineId: Long?
+    abstract val effectiveGroupId: Long?
+    abstract val personInCharge: String
+    abstract val createdAtMillis: Long
+    abstract val triggerAtMillis: Long
+    abstract val dueAtMillis: Long
+    abstract val isCompleted: Boolean
+    abstract val completedAtMillis: Long?
+    abstract val reminderEnabled: Boolean
+
+    data class StandaloneTodo(
+        val todo: TodoReminderEntity,
+        override val effectiveGroupId: Long?
+    ) : TodoFeedItem() {
+        override val stableKey: String get() = "todo_${todo.id}"
+        override val title: String get() = todo.title
+        override val subtitle: String get() = todo.notes
+        override val priority: ReminderPriority get() = todo.priority
+        override val machineId: Long? get() = todo.machineId
+        override val personInCharge: String get() = todo.personInCharge
+        override val createdAtMillis: Long get() = todo.createdAtMillis
+        override val triggerAtMillis: Long get() = todo.dueAtMillis
+        override val dueAtMillis: Long get() = todo.dueAtMillis
+        override val isCompleted: Boolean get() = todo.isCompleted
+        override val completedAtMillis: Long? get() = todo.completedAtMillis
+        override val reminderEnabled: Boolean get() = todo.reminderEnabled
+    }
+
+    data class LinkedTaskReminder(
+        val task: MaintenanceTaskEntity,
+        override val effectiveGroupId: Long?,
+        override val triggerAtMillis: Long
+    ) : TodoFeedItem() {
+        override val stableKey: String get() = "task_rem_${task.id}"
+        override val title: String get() = task.title
+        override val subtitle: String get() = task.description
+        override val priority: ReminderPriority get() = task.priority
+        override val machineId: Long? get() = task.machineId
+        override val personInCharge: String get() = task.personInCharge
+        override val createdAtMillis: Long get() = task.createdAtMillis
+        override val dueAtMillis: Long get() = task.deadlineMillis
+        override val isCompleted: Boolean get() = false
+        override val completedAtMillis: Long? get() = null
+        override val reminderEnabled: Boolean get() = task.reminderEnabled
+    }
+}
+
+fun buildTodoFeedItems(
+    todos: List<TodoReminderEntity>,
+    tasks: List<MaintenanceTaskEntity>,
+    machinesById: Map<Long, MachineEntity>,
+    filter: TodoFilterState
+): List<TodoFeedItem> {
+    val standalone = todos.map { td ->
+        val effGroup = td.groupId ?: td.machineId?.let { machinesById[it]?.groupId }
+        TodoFeedItem.StandaloneTodo(todo = td, effectiveGroupId = effGroup)
+    }
+    val linked = tasks.filter { it.reminderEnabled }.map { t ->
+        val effGroup = t.groupId ?: machinesById[t.machineId]?.groupId
+        val trigger = t.deadlineMillis - TimeUnit.HOURS.toMillis(t.reminderLeadHours.coerceAtLeast(1).toLong())
+        TodoFeedItem.LinkedTaskReminder(
+            task = t,
+            effectiveGroupId = effGroup,
+            triggerAtMillis = trigger
+        )
+    }
+
+    val combined = standalone + linked
+    val q = filter.searchQuery.trim()
+    val filtered = combined.filter { item ->
+        val matchCompleted = filter.showCompleted || !item.isCompleted
+        val matchRepeat = filter.repeatRule == null || when (item) {
+            is TodoFeedItem.StandaloneTodo -> item.todo.repeatRule == filter.repeatRule
+            is TodoFeedItem.LinkedTaskReminder -> item.task.cadence.name == filter.repeatRule.name
+        }
+        val matchPriority = filter.priority == null || item.priority == filter.priority
+        val matchGroup = filter.groupId == null || item.effectiveGroupId == filter.groupId
+        val matchPic = filter.picFilter.isNullOrBlank() ||
+            item.personInCharge.equals(filter.picFilter, ignoreCase = true) ||
+            (item is TodoFeedItem.LinkedTaskReminder &&
+                parseEngineerList(item.task.assistantEngineers).any { it.equals(filter.picFilter, ignoreCase = true) })
+        val m = item.machineId?.let { machinesById[it] }
+        val matchQuery = q.isEmpty() ||
+            item.title.contains(q, ignoreCase = true) ||
+            item.subtitle.contains(q, ignoreCase = true) ||
+            item.personInCharge.contains(q, ignoreCase = true) ||
+            (item is TodoFeedItem.LinkedTaskReminder && item.task.assistantEngineers.contains(q, ignoreCase = true)) ||
+            (m?.name?.contains(q, ignoreCase = true) == true) ||
+            (m?.assetCode?.contains(q, ignoreCase = true) == true)
+        matchCompleted && matchRepeat && matchPriority && matchGroup && matchPic && matchQuery
+    }
+
+    return filtered.sortedWith { a, b ->
+        if (a.isCompleted != b.isCompleted) {
+            return@sortedWith if (a.isCompleted) 1 else -1
+        }
+        val aKey = if (!a.isCompleted) a.triggerAtMillis else (a.completedAtMillis ?: a.dueAtMillis)
+        val bKey = if (!b.isCompleted) b.triggerAtMillis else (b.completedAtMillis ?: b.dueAtMillis)
+        if (filter.sortAscending) aKey.compareTo(bKey) else bKey.compareTo(aKey)
+    }
+}
+
+fun filterAndSortHistoryLogs(
+    serviceLogs: List<ServiceLogWithParts>,
+    machinesById: Map<Long, MachineEntity>,
+    filter: HistoryFilterState
+): List<ServiceLogWithParts> {
+    val q = filter.searchQuery.trim().lowercase()
+    val filtered = serviceLogs.filter { item ->
+        val log = item.log
+        val m = machinesById[log.machineId]
+        val effGroupId = m?.groupId
+        val matchOutcome = filter.outcome == null || log.outcome == filter.outcome
+        val matchPriority = filter.priority == null || log.prioritySnapshot == filter.priority
+        val matchCadence = filter.cadence == null || log.cadenceSnapshot == filter.cadence
+        val matchGroup = filter.groupId == null || effGroupId == filter.groupId
+        val matchPic = filter.picFilter.isNullOrBlank() ||
+            log.personInCharge.equals(filter.picFilter, ignoreCase = true) ||
+            parseEngineerList(log.assistantEngineers).any { it.equals(filter.picFilter, ignoreCase = true) }
+        val partsHay = item.parts.joinToString(" ") { "${it.partCode} ${it.partName} ${it.partDescription}" }
+        val matchQuery = q.isEmpty() ||
+            log.summaryTitle.lowercase().contains(q) ||
+            log.malfunctionDetails.lowercase().contains(q) ||
+            log.rejectionReason.lowercase().contains(q) ||
+            log.personInCharge.lowercase().contains(q) ||
+            log.assistantEngineers.lowercase().contains(q) ||
+            partsHay.lowercase().contains(q) ||
+            (m?.assetCode?.lowercase()?.contains(q) == true) ||
+            (m?.name?.lowercase()?.contains(q) == true)
+        matchOutcome && matchPriority && matchCadence && matchGroup && matchPic && matchQuery
+    }
+    return if (filter.sortAscending) {
+        filtered.sortedBy { it.log.completedAtMillis }
+    } else {
+        filtered.sortedByDescending { it.log.completedAtMillis }
+    }
+}
+
 @Composable
 fun TodoRemindersSubTab(
     state: MachinaUiState,
@@ -116,6 +269,9 @@ fun TodoRemindersSubTab(
     onAddTodo: () -> Unit,
     onEditTodo: (TodoReminderEntity) -> Unit,
     onDeleteTodo: (TodoReminderEntity) -> Unit,
+    onCompleteTask: (MaintenanceTaskEntity) -> Unit,
+    onEditTask: (MaintenanceTaskEntity) -> Unit,
+    onRejectTask: (MaintenanceTaskEntity) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val now = System.currentTimeMillis()
@@ -124,32 +280,26 @@ fun TodoRemindersSubTab(
     val filter = state.todoFilter
     val sem = LocalMachinaColors.current
     val pageSize = state.preferences.todoPageSize.let { if (it in listOf(25, 50, 100)) it else 25 }
+    var showPicMenu by remember { mutableStateOf(false) }
 
-    val activeCount = remember(state.todos) { state.todos.count { !it.isCompleted } }
+    val allFeedItems = remember(state.todos, state.tasks, machinesById) {
+        buildTodoFeedItems(state.todos, state.tasks, machinesById, TodoFilterState(showCompleted = true))
+    }
+    val openCount = remember(allFeedItems) { allFeedItems.count { !it.isCompleted } }
     val completedCount = remember(state.todos) { state.todos.count { it.isCompleted } }
-    val overdueCount = remember(state.todos, now) {
-        state.todos.count { !it.isCompleted && it.dueAtMillis < now }
+    val overdueCount = remember(allFeedItems, now) {
+        allFeedItems.count { !it.isCompleted && it.dueAtMillis < now }
     }
-    val recurringCount = remember(state.todos) {
-        state.todos.count { !it.isCompleted && it.repeatRule != RepeatRule.ONCE }
+    val approachingCount = remember(allFeedItems, now) {
+        allFeedItems.count { item ->
+            !item.isCompleted &&
+                item.dueAtMillis >= now &&
+                (item.triggerAtMillis <= now || (item.dueAtMillis - now) <= TimeUnit.HOURS.toMillis(24))
+        }
     }
 
-    val filteredTodos = remember(state.todos, filter, machinesById) {
-        state.todos.filter { td ->
-            val m = td.machineId?.let { machinesById[it] }
-            val matchRule = filter.repeatRule == null || td.repeatRule == filter.repeatRule
-            val matchCompleted = filter.showCompleted || !td.isCompleted
-            val q = filter.searchQuery.trim()
-            val matchQuery = q.isEmpty() ||
-                td.title.contains(q, ignoreCase = true) ||
-                td.notes.contains(q, ignoreCase = true) ||
-                td.personInCharge.contains(q, ignoreCase = true) ||
-                (m?.name?.contains(q, ignoreCase = true) == true)
-            matchRule && matchCompleted && matchQuery
-        }.sortedWith(
-            compareBy<TodoReminderEntity> { it.isCompleted }
-                .thenBy { td -> if (!td.isCompleted) td.dueAtMillis else -(td.completedAtMillis ?: td.dueAtMillis) }
-        )
+    val filteredTodos = remember(state.todos, state.tasks, filter, machinesById) {
+        buildTodoFeedItems(state.todos, state.tasks, machinesById, filter)
     }
     val pagedTodos = remember(filteredTodos, filter.currentPage, pageSize) {
         paginateItems(filteredTodos, filter.currentPage, pageSize)
@@ -166,8 +316,8 @@ fun TodoRemindersSubTab(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 KpiMetricCard(
-                    label = "Active",
-                    value = "$activeCount",
+                    label = "Open",
+                    value = "$openCount",
                     icon = Icons.Filled.Checklist,
                     accentColor = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.weight(1f)
@@ -180,10 +330,10 @@ fun TodoRemindersSubTab(
                     modifier = Modifier.weight(1f)
                 )
                 KpiMetricCard(
-                    label = "Recurring",
-                    value = "$recurringCount",
-                    icon = Icons.Filled.Repeat,
-                    accentColor = sem.info,
+                    label = "Approaching",
+                    value = "$approachingCount",
+                    icon = Icons.Filled.Schedule,
+                    accentColor = sem.warning,
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -191,24 +341,87 @@ fun TodoRemindersSubTab(
 
         item(key = "todo_filters") {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
+                CompactSearchField(
                     value = filter.searchQuery,
                     onValueChange = { q -> onUpdateFilter { it.copy(searchQuery = q, currentPage = 0) } },
-                    placeholder = { Text("Search reminders, notes, or PIC...") },
-                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Search reminders") },
-                    trailingIcon = {
-                        if (filter.searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { onUpdateFilter { it.copy(searchQuery = "", currentPage = 0) } }) {
-                                Icon(Icons.Filled.Clear, contentDescription = "Clear search")
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
+                    placeholder = "Search reminders, tasks, machine, or PIC...",
+                    searchTag = "todo_search_input",
+                    contentDescription = "Search reminders",
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .testTag("todo_search_input")
-                )
+                        .horizontalScroll(rememberScrollState())
+                ) {
+                    FilterChip(
+                        selected = true,
+                        onClick = { onUpdateFilter { it.copy(sortAscending = !it.sortAscending, currentPage = 0) } },
+                        leadingIcon = {
+                            Icon(Icons.Filled.Sort, contentDescription = null, modifier = Modifier.size(16.dp))
+                        },
+                        label = {
+                            Text(if (filter.sortAscending) "Date ↑ Soonest" else "Date ↓ Latest")
+                        },
+                        modifier = Modifier.testTag("todo_date_sort_chip")
+                    )
+                    FilterChip(
+                        selected = filter.priority == null,
+                        onClick = { onUpdateFilter { it.copy(priority = null, currentPage = 0) } },
+                        label = { Text("All Priorities") },
+                        modifier = Modifier.testTag("todo_priority_chip_all")
+                    )
+                    ReminderPriority.entries.forEach { prio ->
+                        FilterChip(
+                            selected = filter.priority == prio,
+                            onClick = {
+                                onUpdateFilter {
+                                    it.copy(
+                                        priority = if (it.priority == prio) null else prio,
+                                        currentPage = 0
+                                    )
+                                }
+                            },
+                            label = { Text(prio.label) },
+                            modifier = Modifier.testTag("todo_priority_chip_${prio.name.lowercase()}")
+                        )
+                    }
+                    Box {
+                        FilterChip(
+                            selected = !filter.picFilter.isNullOrBlank(),
+                            onClick = { showPicMenu = true },
+                            leadingIcon = {
+                                Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(16.dp))
+                            },
+                            label = { Text(filter.picFilter ?: "All PICs") },
+                            modifier = Modifier.testTag("todo_pic_filter_chip")
+                        )
+                        DropdownMenu(
+                            expanded = showPicMenu,
+                            onDismissRequest = { showPicMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("All Engineers") },
+                                onClick = {
+                                    onUpdateFilter { it.copy(picFilter = null, currentPage = 0) }
+                                    showPicMenu = false
+                                }
+                            )
+                            state.knownEngineers.forEach { pic ->
+                                DropdownMenuItem(
+                                    text = { Text(pic) },
+                                    onClick = {
+                                        onUpdateFilter { it.copy(picFilter = pic, currentPage = 0) }
+                                        showPicMenu = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
 
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -235,6 +448,36 @@ fun TodoRemindersSubTab(
                             label = { Text(rule.label) },
                             modifier = Modifier.testTag("todo_rule_chip_${rule.name.lowercase()}")
                         )
+                    }
+                }
+
+                if (state.groups.isNotEmpty()) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                    ) {
+                        FilterChip(
+                            selected = filter.groupId == null,
+                            onClick = { onUpdateFilter { it.copy(groupId = null, currentPage = 0) } },
+                            label = { Text("All Groups") }
+                        )
+                        state.groups.forEach { group ->
+                            FilterChip(
+                                selected = filter.groupId == group.id,
+                                onClick = {
+                                    onUpdateFilter {
+                                        it.copy(
+                                            groupId = if (it.groupId == group.id) null else group.id,
+                                            currentPage = 0
+                                        )
+                                    }
+                                },
+                                label = { Text(group.name) },
+                                modifier = Modifier.testTag("todo_group_chip_${group.id}")
+                            )
+                        }
                     }
                 }
 
@@ -307,24 +550,44 @@ fun TodoRemindersSubTab(
                 EmptyStateCard(
                     icon = Icons.Filled.Checklist,
                     title = "No reminders scheduled",
-                    subtitle = "Create personal engineer to-dos triggered once, daily, weekly, monthly, or yearly.",
+                    subtitle = "Create personal engineer to-dos or enable deadline reminders on maintenance tasks.",
                     actionLabel = "New Reminder",
                     onAction = onAddTodo
                 )
             }
         } else {
-            items(pagedTodos.items, key = { "todo_${it.id}" }) { todo ->
-                val machine = todo.machineId?.let { machinesById[it] }
-                val group = todo.groupId?.let { groupsById[it] }
-                TodoReminderCard(
-                    todo = todo,
-                    machine = machine,
-                    group = group,
-                    nowMillis = now,
-                    onToggleComplete = { onToggleComplete(todo) },
-                    onEdit = { onEditTodo(todo) },
-                    onDelete = { onDeleteTodo(todo) }
-                )
+            items(pagedTodos.items, key = { it.stableKey }) { feedItem ->
+                when (feedItem) {
+                    is TodoFeedItem.StandaloneTodo -> {
+                        val todo = feedItem.todo
+                        val machine = todo.machineId?.let { machinesById[it] }
+                        val group = feedItem.effectiveGroupId?.let { groupsById[it] }
+                        TodoReminderCard(
+                            todo = todo,
+                            machine = machine,
+                            group = group,
+                            nowMillis = now,
+                            onToggleComplete = { onToggleComplete(todo) },
+                            onEdit = { onEditTodo(todo) },
+                            onDelete = { onDeleteTodo(todo) }
+                        )
+                    }
+                    is TodoFeedItem.LinkedTaskReminder -> {
+                        val task = feedItem.task
+                        val machine = machinesById[task.machineId]
+                        val group = feedItem.effectiveGroupId?.let { groupsById[it] }
+                        LinkedTaskReminderCard(
+                            task = task,
+                            triggerAtMillis = feedItem.triggerAtMillis,
+                            machine = machine,
+                            group = group,
+                            nowMillis = now,
+                            onComplete = { onCompleteTask(task) },
+                            onReject = { onRejectTask(task) },
+                            onEdit = { onEditTask(task) }
+                        )
+                    }
+                }
             }
 
             if (pagedTodos.totalPages > 1 || pagedTodos.totalItems > 25) {
@@ -459,6 +722,12 @@ private fun TodoReminderCard(
                     )
                 }
 
+                Text(
+                    text = "Created: ${Formatters.formatDateTime(todo.createdAtMillis)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -524,15 +793,191 @@ private fun TodoReminderCard(
 }
 
 @Composable
+private fun LinkedTaskReminderCard(
+    task: MaintenanceTaskEntity,
+    triggerAtMillis: Long,
+    machine: MachineEntity?,
+    group: CustomGroupEntity?,
+    nowMillis: Long,
+    onComplete: () -> Unit,
+    onReject: () -> Unit,
+    onEdit: () -> Unit
+) {
+    val sem = LocalMachinaColors.current
+    val isOverdue = task.deadlineMillis < nowMillis
+    val isTriggered = !isOverdue && triggerAtMillis <= nowMillis
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(
+            width = if (isOverdue) 1.5.dp else 1.dp,
+            color = when {
+                isOverdue -> sem.critical.copy(alpha = 0.5f)
+                isTriggered -> sem.warning.copy(alpha = 0.5f)
+                else -> MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+            }
+        ),
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("linked_task_reminder_card_${task.id}")
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(14.dp)
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.horizontalScroll(rememberScrollState())
+            ) {
+                StatusPill(
+                    text = "TASK REMINDER",
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                PriorityPill(task.priority)
+                CadencePill(task.cadence)
+                if (machine != null) {
+                    StatusPill(
+                        text = machine.assetCode,
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (group != null) {
+                    GroupBadge(group)
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = task.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (machine != null) {
+                    Text(
+                        text = "${machine.name} · ${machine.locationZone}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                if (task.description.isNotBlank()) {
+                    Text(
+                        text = task.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Text(
+                    text = "Created: ${Formatters.formatDateTime(task.createdAtMillis)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.horizontalScroll(rememberScrollState())
+            ) {
+                StatusPill(
+                    text = when {
+                        isOverdue -> Formatters.formatRelativeDeadline(task.deadlineMillis, nowMillis)
+                        isTriggered -> "Reminder Due · ${Formatters.formatLeadTime(task.reminderLeadHours)} lead"
+                        else -> "Remind ${Formatters.formatDateTime(triggerAtMillis)}"
+                    },
+                    containerColor = when {
+                        isOverdue -> sem.criticalContainer
+                        isTriggered -> sem.warningContainer
+                        else -> sem.infoContainer
+                    },
+                    contentColor = when {
+                        isOverdue -> sem.critical
+                        isTriggered -> sem.warning
+                        else -> sem.info
+                    }
+                )
+                Text(
+                    text = "Deadline: ${Formatters.formatDateTime(task.deadlineMillis)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.width(3.dp))
+                    Text(task.personInCharge, style = MaterialTheme.typography.labelSmall)
+                }
+                if (task.assistantEngineers.isNotBlank()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Groups, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(3.dp))
+                        Text(
+                            text = "+ ${task.assistantEngineers}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                OutlinedButton(
+                    onClick = onEdit,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                    modifier = Modifier.minimumInteractiveComponentSize()
+                ) {
+                    Icon(Icons.Filled.Edit, contentDescription = "Edit task", modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Edit")
+                }
+                OutlinedButton(
+                    onClick = onReject,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = sem.critical),
+                    border = BorderStroke(1.dp, sem.critical.copy(alpha = 0.55f)),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                    modifier = Modifier.minimumInteractiveComponentSize()
+                ) {
+                    Icon(Icons.Filled.Block, contentDescription = "Reject task", modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Reject")
+                }
+                Button(
+                    onClick = onComplete,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.minimumInteractiveComponentSize()
+                ) {
+                    Icon(Icons.Filled.CheckCircle, contentDescription = "Complete task", modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Complete")
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun TaskHistorySubTab(
     state: MachinaUiState,
+    onUpdateFilter: ((HistoryFilterState) -> HistoryFilterState) -> Unit,
     onDeleteLog: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var outcomeFilter by remember { mutableStateOf<TaskOutcome?>(null) }
-    var searchQuery by remember { mutableStateOf("") }
     val machinesById = remember(state.machines) { state.machines.associateBy { it.id } }
+    val groupsById = remember(state.groups) { state.groups.associateBy { it.id } }
+    val filter = state.historyFilter
     val sem = LocalMachinaColors.current
+    var showPicMenu by remember { mutableStateOf(false) }
 
     val doneCount = remember(state.serviceLogs) {
         state.serviceLogs.count { it.log.outcome == TaskOutcome.DONE }
@@ -541,22 +986,8 @@ fun TaskHistorySubTab(
         state.serviceLogs.count { it.log.outcome == TaskOutcome.REJECTED }
     }
 
-    val filteredLogs = remember(state.serviceLogs, outcomeFilter, searchQuery, machinesById) {
-        val q = searchQuery.trim().lowercase()
-        state.serviceLogs.filter { item ->
-            val log = item.log
-            val m = machinesById[log.machineId]
-            val matchOutcome = outcomeFilter == null || log.outcome == outcomeFilter
-            val matchQuery = q.isEmpty() ||
-                log.summaryTitle.lowercase().contains(q) ||
-                log.malfunctionDetails.lowercase().contains(q) ||
-                log.rejectionReason.lowercase().contains(q) ||
-                log.personInCharge.lowercase().contains(q) ||
-                log.assistantEngineers.lowercase().contains(q) ||
-                (m?.assetCode?.lowercase()?.contains(q) == true) ||
-                (m?.name?.lowercase()?.contains(q) == true)
-            matchOutcome && matchQuery
-        }
+    val filteredLogs = remember(state.serviceLogs, filter, machinesById) {
+        filterAndSortHistoryLogs(state.serviceLogs, machinesById, filter)
     }
 
     LazyColumn(
@@ -595,23 +1026,13 @@ fun TaskHistorySubTab(
 
         item(key = "history_filters") {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Search completed/rejected task, reason, engineer...") },
-                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Search history") },
-                    trailingIcon = {
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
-                                Icon(Icons.Filled.Clear, contentDescription = "Clear search")
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("task_history_search_input")
+                CompactSearchField(
+                    value = filter.searchQuery,
+                    onValueChange = { q -> onUpdateFilter { it.copy(searchQuery = q) } },
+                    placeholder = "Search task, reason, engineer, or part...",
+                    searchTag = "task_history_search_input",
+                    contentDescription = "Search history",
+                    modifier = Modifier.fillMaxWidth()
                 )
 
                 Row(
@@ -621,27 +1042,151 @@ fun TaskHistorySubTab(
                         .horizontalScroll(rememberScrollState())
                 ) {
                     FilterChip(
-                        selected = outcomeFilter == null,
-                        onClick = { outcomeFilter = null },
+                        selected = true,
+                        onClick = { onUpdateFilter { it.copy(sortAscending = !it.sortAscending) } },
+                        leadingIcon = {
+                            Icon(Icons.Filled.Sort, contentDescription = null, modifier = Modifier.size(16.dp))
+                        },
+                        label = {
+                            Text(if (filter.sortAscending) "Recorded ↑ Oldest" else "Recorded ↓ Newest")
+                        },
+                        modifier = Modifier.testTag("history_date_sort_chip")
+                    )
+                    FilterChip(
+                        selected = filter.outcome == null,
+                        onClick = { onUpdateFilter { it.copy(outcome = null) } },
                         label = { Text("All (${state.serviceLogs.size})") },
                         modifier = Modifier.testTag("history_filter_all")
                     )
                     FilterChip(
-                        selected = outcomeFilter == TaskOutcome.DONE,
+                        selected = filter.outcome == TaskOutcome.DONE,
                         onClick = {
-                            outcomeFilter = if (outcomeFilter == TaskOutcome.DONE) null else TaskOutcome.DONE
+                            onUpdateFilter {
+                                it.copy(outcome = if (it.outcome == TaskOutcome.DONE) null else TaskOutcome.DONE)
+                            }
                         },
                         label = { Text("Done ($doneCount)") },
                         modifier = Modifier.testTag("history_filter_done")
                     )
                     FilterChip(
-                        selected = outcomeFilter == TaskOutcome.REJECTED,
+                        selected = filter.outcome == TaskOutcome.REJECTED,
                         onClick = {
-                            outcomeFilter = if (outcomeFilter == TaskOutcome.REJECTED) null else TaskOutcome.REJECTED
+                            onUpdateFilter {
+                                it.copy(outcome = if (it.outcome == TaskOutcome.REJECTED) null else TaskOutcome.REJECTED)
+                            }
                         },
                         label = { Text("Rejected ($rejectedCount)") },
                         modifier = Modifier.testTag("history_filter_rejected")
                     )
+                }
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                ) {
+                    FilterChip(
+                        selected = filter.priority == null,
+                        onClick = { onUpdateFilter { it.copy(priority = null) } },
+                        label = { Text("All Priorities") }
+                    )
+                    ReminderPriority.entries.forEach { prio ->
+                        FilterChip(
+                            selected = filter.priority == prio,
+                            onClick = {
+                                onUpdateFilter {
+                                    it.copy(priority = if (it.priority == prio) null else prio)
+                                }
+                            },
+                            label = { Text(prio.label) },
+                            modifier = Modifier.testTag("history_priority_chip_${prio.name.lowercase()}")
+                        )
+                    }
+                    Box {
+                        FilterChip(
+                            selected = !filter.picFilter.isNullOrBlank(),
+                            onClick = { showPicMenu = true },
+                            leadingIcon = {
+                                Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(16.dp))
+                            },
+                            label = { Text(filter.picFilter ?: "All PICs") },
+                            modifier = Modifier.testTag("history_pic_filter_chip")
+                        )
+                        DropdownMenu(
+                            expanded = showPicMenu,
+                            onDismissRequest = { showPicMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("All Engineers") },
+                                onClick = {
+                                    onUpdateFilter { it.copy(picFilter = null) }
+                                    showPicMenu = false
+                                }
+                            )
+                            state.knownEngineers.forEach { pic ->
+                                DropdownMenuItem(
+                                    text = { Text(pic) },
+                                    onClick = {
+                                        onUpdateFilter { it.copy(picFilter = pic) }
+                                        showPicMenu = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                ) {
+                    FilterChip(
+                        selected = filter.cadence == null,
+                        onClick = { onUpdateFilter { it.copy(cadence = null) } },
+                        label = { Text("All Cadences") }
+                    )
+                    Cadence.entries.forEach { cad ->
+                        FilterChip(
+                            selected = filter.cadence == cad,
+                            onClick = {
+                                onUpdateFilter {
+                                    it.copy(cadence = if (it.cadence == cad) null else cad)
+                                }
+                            },
+                            label = { Text(cad.label) },
+                            modifier = Modifier.testTag("history_cadence_chip_${cad.name.lowercase()}")
+                        )
+                    }
+                }
+
+                if (state.groups.isNotEmpty()) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                    ) {
+                        FilterChip(
+                            selected = filter.groupId == null,
+                            onClick = { onUpdateFilter { it.copy(groupId = null) } },
+                            label = { Text("All Groups") }
+                        )
+                        state.groups.forEach { group ->
+                            FilterChip(
+                                selected = filter.groupId == group.id,
+                                onClick = {
+                                    onUpdateFilter {
+                                        it.copy(groupId = if (it.groupId == group.id) null else group.id)
+                                    }
+                                },
+                                label = { Text(group.name) },
+                                modifier = Modifier.testTag("history_group_chip_${group.id}")
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -650,15 +1195,18 @@ fun TaskHistorySubTab(
             item(key = "empty_history") {
                 EmptyStateCard(
                     icon = Icons.Filled.History,
-                    title = "No historical tasks yet",
+                    title = "No matching historical records",
                     subtitle = "Machine reports are generated automatically when tasks are marked Done or Rejected."
                 )
             }
         } else {
             items(filteredLogs, key = { "hist_${it.log.id}" }) { item ->
+                val machine = machinesById[item.log.machineId]
+                val group = machine?.groupId?.let { groupsById[it] }
                 TaskHistoryCard(
                     item = item,
-                    machine = machinesById[item.log.machineId],
+                    machine = machine,
+                    group = group,
                     onDelete = { onDeleteLog(item.log.id) }
                 )
             }
@@ -674,6 +1222,7 @@ fun TaskHistorySubTab(
 private fun TaskHistoryCard(
     item: ServiceLogWithParts,
     machine: MachineEntity?,
+    group: CustomGroupEntity?,
     onDelete: () -> Unit
 ) {
     val log = item.log
@@ -701,13 +1250,24 @@ private fun TaskHistoryCard(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                TaskOutcomePill(log.outcome)
-                log.cadenceSnapshot?.let { CadencePill(it) }
-                if (isMalfunction && !isRejected) {
-                    StatusPill("MALFUNCTION", sem.criticalContainer, sem.critical)
-                    SeverityPill(log.severity)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState())
+                ) {
+                    TaskOutcomePill(log.outcome)
+                    log.prioritySnapshot?.let { PriorityPill(it) }
+                    log.cadenceSnapshot?.let { CadencePill(it) }
+                    if (group != null) {
+                        GroupBadge(group)
+                    }
+                    if (isMalfunction && !isRejected) {
+                        StatusPill("MALFUNCTION", sem.criticalContainer, sem.critical)
+                        SeverityPill(log.severity)
+                    }
                 }
-                Spacer(Modifier.weight(1f))
                 IconButton(onClick = onDelete, modifier = Modifier.testTag("delete_history_${log.id}")) {
                     Icon(
                         Icons.Filled.DeleteOutline,
@@ -749,16 +1309,17 @@ private fun TaskHistoryCard(
                 )
             }
 
+            Text(
+                text = "Created: ${Formatters.formatDateTime(log.createdAtMillis)} · Recorded: ${Formatters.formatDateTime(log.completedAtMillis)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.horizontalScroll(rememberScrollState())
             ) {
-                Text(
-                    text = Formatters.formatDateTime(log.completedAtMillis),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.width(3.dp))

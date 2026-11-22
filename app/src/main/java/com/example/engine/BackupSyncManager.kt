@@ -72,6 +72,7 @@ data class TaskBackupDto(
     val reminderEnabled: Boolean = true,
     val reminderLeadHours: Int = 24,
     val lastCompletedMillis: Long? = null,
+    val createdAtMillis: Long = 0L,
     val updatedAtMillis: Long
 )
 
@@ -89,6 +90,7 @@ data class TodoBackupDto(
     val isCompleted: Boolean = false,
     val priority: String = "NORMAL",
     val completedAtMillis: Long? = null,
+    val createdAtMillis: Long = 0L,
     val updatedAtMillis: Long
 )
 
@@ -110,6 +112,7 @@ data class ServiceLogBackupDto(
     val taskUuid: String? = null,
     val entryType: String,
     val cadenceSnapshot: String? = null,
+    val prioritySnapshot: String? = null,
     val summaryTitle: String,
     val malfunctionDetails: String = "",
     val severity: String = "LOW",
@@ -120,6 +123,7 @@ data class ServiceLogBackupDto(
     val serviceDurationMinutes: Int = 0,
     val completedAtMillis: Long,
     val deadlineWasMet: Boolean = true,
+    val createdAtMillis: Long = 0L,
     val updatedAtMillis: Long,
     val spareParts: List<SparePartBackupDto> = emptyList()
 )
@@ -221,6 +225,7 @@ object BackupSyncManager {
                     reminderEnabled = it.reminderEnabled,
                     reminderLeadHours = it.reminderLeadHours,
                     lastCompletedMillis = it.lastCompletedMillis,
+                    createdAtMillis = it.createdAtMillis,
                     updatedAtMillis = it.updatedAtMillis
                 )
             },
@@ -238,6 +243,7 @@ object BackupSyncManager {
                     isCompleted = it.isCompleted,
                     priority = it.priority.name,
                     completedAtMillis = it.completedAtMillis,
+                    createdAtMillis = it.createdAtMillis,
                     updatedAtMillis = it.updatedAtMillis
                 )
             },
@@ -249,6 +255,7 @@ object BackupSyncManager {
                     taskUuid = l.taskId?.let { tid -> taskUuidById[tid] },
                     entryType = l.entryType.name,
                     cadenceSnapshot = l.cadenceSnapshot?.name,
+                    prioritySnapshot = l.prioritySnapshot?.name,
                     summaryTitle = l.summaryTitle,
                     malfunctionDetails = l.malfunctionDetails,
                     severity = l.severity.name,
@@ -259,6 +266,7 @@ object BackupSyncManager {
                     serviceDurationMinutes = l.serviceDurationMinutes,
                     completedAtMillis = l.completedAtMillis,
                     deadlineWasMet = l.deadlineWasMet,
+                    createdAtMillis = l.createdAtMillis,
                     updatedAtMillis = l.updatedAtMillis,
                     spareParts = item.parts.map { p ->
                         SparePartBackupDto(
@@ -404,6 +412,7 @@ object BackupSyncManager {
             val cadence = runCatching { Cadence.valueOf(t.cadence) }.getOrDefault(Cadence.DAILY)
             val priority = runCatching { ReminderPriority.valueOf(t.priority) }.getOrDefault(ReminderPriority.NORMAL)
             val existing = existingTasks[t.uuid]
+            val resolvedCreated = if (t.createdAtMillis > 0L) t.createdAtMillis else t.updatedAtMillis
             if (existing == null) {
                 val id = dao.insertTask(
                     MaintenanceTaskEntity(
@@ -421,6 +430,7 @@ object BackupSyncManager {
                         reminderEnabled = t.reminderEnabled,
                         reminderLeadHours = t.reminderLeadHours,
                         lastCompletedMillis = t.lastCompletedMillis,
+                        createdAtMillis = resolvedCreated,
                         updatedAtMillis = t.updatedAtMillis
                     )
                 )
@@ -441,6 +451,7 @@ object BackupSyncManager {
                         reminderEnabled = t.reminderEnabled,
                         reminderLeadHours = t.reminderLeadHours,
                         lastCompletedMillis = t.lastCompletedMillis,
+                        createdAtMillis = if (t.createdAtMillis > 0L) t.createdAtMillis else existing.createdAtMillis,
                         updatedAtMillis = t.updatedAtMillis
                     )
                 )
@@ -454,6 +465,7 @@ object BackupSyncManager {
             val repeatRule = runCatching { RepeatRule.valueOf(td.repeatRule) }.getOrDefault(RepeatRule.ONCE)
             val priority = runCatching { ReminderPriority.valueOf(td.priority) }.getOrDefault(ReminderPriority.NORMAL)
             val existing = existingTodos[td.uuid]
+            val resolvedCreated = if (td.createdAtMillis > 0L) td.createdAtMillis else td.updatedAtMillis
             if (existing == null) {
                 dao.insertTodo(
                     TodoReminderEntity(
@@ -469,6 +481,7 @@ object BackupSyncManager {
                         isCompleted = td.isCompleted,
                         priority = priority,
                         completedAtMillis = td.completedAtMillis,
+                        createdAtMillis = resolvedCreated,
                         updatedAtMillis = td.updatedAtMillis
                     )
                 )
@@ -486,6 +499,7 @@ object BackupSyncManager {
                         isCompleted = td.isCompleted,
                         priority = priority,
                         completedAtMillis = td.completedAtMillis,
+                        createdAtMillis = if (td.createdAtMillis > 0L) td.createdAtMillis else existing.createdAtMillis,
                         updatedAtMillis = td.updatedAtMillis
                     )
                 )
@@ -499,8 +513,10 @@ object BackupSyncManager {
             val entryType = runCatching { ServiceEntryType.valueOf(lg.entryType) }
                 .getOrDefault(ServiceEntryType.PREVENTIVE_SERVICE)
             val cadenceSnap = lg.cadenceSnapshot?.let { runCatching { Cadence.valueOf(it) }.getOrNull() }
+            val prioritySnap = lg.prioritySnapshot?.let { runCatching { ReminderPriority.valueOf(it) }.getOrNull() }
             val severity = runCatching { Severity.valueOf(lg.severity) }.getOrDefault(Severity.LOW)
             val outcome = runCatching { TaskOutcome.valueOf(lg.outcome) }.getOrDefault(TaskOutcome.DONE)
+            val resolvedCreated = if (lg.createdAtMillis > 0L) lg.createdAtMillis else lg.completedAtMillis
 
             val existing = existingLogs[lg.uuid]
             if (existing == null) {
@@ -510,6 +526,7 @@ object BackupSyncManager {
                     taskId = taskId,
                     entryType = entryType,
                     cadenceSnapshot = cadenceSnap,
+                    prioritySnapshot = prioritySnap,
                     summaryTitle = lg.summaryTitle,
                     malfunctionDetails = lg.malfunctionDetails,
                     severity = severity,
@@ -520,6 +537,7 @@ object BackupSyncManager {
                     serviceDurationMinutes = lg.serviceDurationMinutes,
                     completedAtMillis = lg.completedAtMillis,
                     deadlineWasMet = lg.deadlineWasMet,
+                    createdAtMillis = resolvedCreated,
                     updatedAtMillis = lg.updatedAtMillis
                 )
                 val partEntities = lg.spareParts.map { p ->
@@ -541,6 +559,7 @@ object BackupSyncManager {
                     taskId = taskId,
                     entryType = entryType,
                     cadenceSnapshot = cadenceSnap,
+                    prioritySnapshot = prioritySnap ?: existing.log.prioritySnapshot,
                     summaryTitle = lg.summaryTitle,
                     malfunctionDetails = lg.malfunctionDetails,
                     severity = severity,
@@ -551,6 +570,7 @@ object BackupSyncManager {
                     serviceDurationMinutes = lg.serviceDurationMinutes,
                     completedAtMillis = lg.completedAtMillis,
                     deadlineWasMet = lg.deadlineWasMet,
+                    createdAtMillis = if (lg.createdAtMillis > 0L) lg.createdAtMillis else existing.log.createdAtMillis,
                     updatedAtMillis = lg.updatedAtMillis
                 )
                 dao.insertServiceLog(updatedLog)

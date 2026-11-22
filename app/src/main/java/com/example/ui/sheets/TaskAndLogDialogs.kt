@@ -62,14 +62,16 @@ import com.example.data.Cadence
 import com.example.data.CustomGroupEntity
 import com.example.data.EngineerEntity
 import com.example.data.MachineEntity
+import com.example.data.MachineStatus
 import com.example.data.MaintenanceTaskEntity
 import com.example.data.ReminderPriority
-import com.example.data.Severity
 import com.example.data.SparePartDraft
 import com.example.data.WarehousePartEntity
 import com.example.data.formatEngineerList
 import com.example.data.parseEngineerList
+import com.example.engine.Formatters
 import com.example.ui.components.AssistantEngineersSelector
+import com.example.ui.components.CompactSearchField
 import com.example.ui.components.DateTimePickerField
 import com.example.ui.components.EngineerPickerField
 import com.example.ui.components.StatusPill
@@ -101,11 +103,14 @@ fun TaskEditorDialog(
         assistantEngineers: String,
         reminderEnabled: Boolean,
         reminderLeadHours: Int,
-        lastCompletedMillis: Long?
+        lastCompletedMillis: Long?,
+        machineStatus: MachineStatus
     ) -> Unit
 ) {
-    var selectedMachineId by remember {
-        mutableStateOf(initialTask?.machineId ?: defaultMachineId ?: machines.firstOrNull()?.id ?: 0L)
+    val initialMachineId = initialTask?.machineId ?: defaultMachineId ?: machines.firstOrNull()?.id ?: 0L
+    var selectedMachineId by remember { mutableStateOf(initialMachineId) }
+    var machineStatus by remember {
+        mutableStateOf(machines.find { it.id == initialMachineId }?.status ?: MachineStatus.OPERATIONAL)
     }
     var selectedGroupId by remember { mutableStateOf(initialTask?.groupId) }
     var title by remember { mutableStateOf(initialTask?.title ?: "") }
@@ -157,6 +162,14 @@ fun TaskEditorDialog(
                     .heightIn(max = 480.dp)
                     .verticalScroll(rememberScrollState())
             ) {
+                if (initialTask != null) {
+                    Text(
+                        text = "Created: ${Formatters.formatDateTime(initialTask.createdAtMillis)}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
                 // Machine Picker
                 Box {
                     val m = machines.find { it.id == selectedMachineId }
@@ -179,10 +192,26 @@ fun TaskEditorDialog(
                                 text = { Text("${machine.assetCode} · ${machine.name}") },
                                 onClick = {
                                     selectedMachineId = machine.id
+                                    machineStatus = machine.status
                                     showMachineDropdown = false
                                 }
                             )
                         }
+                    }
+                }
+
+                Text("Machine Current Condition / Status", style = MaterialTheme.typography.labelLarge)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                ) {
+                    MachineStatus.entries.forEach { st ->
+                        FilterChip(
+                            selected = machineStatus == st,
+                            onClick = { machineStatus = st },
+                            label = { Text(st.label) },
+                            modifier = Modifier.testTag("task_editor_machine_status_${st.name.lowercase()}")
+                        )
                     }
                 }
 
@@ -426,7 +455,8 @@ fun TaskEditorDialog(
                         formatEngineerList(selectedAssistants, validPic),
                         reminderEnabled,
                         computedLeadHours,
-                        initialTask?.lastCompletedMillis
+                        initialTask?.lastCompletedMillis,
+                        machineStatus
                     )
                 },
                 modifier = Modifier.testTag("save_task_button")
@@ -452,9 +482,7 @@ fun CompleteTaskDialog(
         assistantEngineers: List<String>,
         actualDurationMinutes: Int,
         notes: String,
-        spareParts: List<SparePartDraft>,
-        flagMalfunction: Boolean,
-        malfunctionSeverity: Severity
+        spareParts: List<SparePartDraft>
     ) -> Unit
 ) {
     val initialPic = remember(task, engineers) {
@@ -473,8 +501,6 @@ fun CompleteTaskDialog(
     }
     var durationText by remember { mutableStateOf(task.estimatedMinutes.toString()) }
     var notes by remember { mutableStateOf("") }
-    var flagMalfunction by remember { mutableStateOf(false) }
-    var severity by remember { mutableStateOf(Severity.MEDIUM) }
     var picError by remember { mutableStateOf(false) }
     val spareParts = remember { mutableStateListOf<SparePartDraft>() }
 
@@ -546,32 +572,6 @@ fun CompleteTaskDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Checkbox(
-                        checked = flagMalfunction,
-                        onCheckedChange = { flagMalfunction = it }
-                    )
-                    Text("Malfunction / Breakdown discovered", style = MaterialTheme.typography.bodyMedium)
-                }
-
-                if (flagMalfunction) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.horizontalScroll(rememberScrollState())
-                    ) {
-                        Severity.entries.forEach { sev ->
-                            FilterChip(
-                                selected = severity == sev,
-                                onClick = { severity = sev },
-                                label = { Text(sev.label) }
-                            )
-                        }
-                    }
-                }
-
                 SparePartsEditorSection(
                     spareParts = spareParts,
                     warehouseCatalog = warehouseCatalog
@@ -599,9 +599,7 @@ fun CompleteTaskDialog(
                         selectedAssistants.filterNot { it.equals(validPic, ignoreCase = true) },
                         durationText.toIntOrNull() ?: task.estimatedMinutes,
                         notes,
-                        spareParts.toList(),
-                        flagMalfunction,
-                        severity
+                        spareParts.toList()
                     )
                 },
                 modifier = Modifier.testTag("confirm_complete_task_button")
@@ -940,23 +938,12 @@ fun SparePartsEditorSection(
             }
 
             if (usedWarehousePart) {
-                OutlinedTextField(
+                CompactSearchField(
                     value = catalogSearchQuery,
                     onValueChange = { catalogSearchQuery = it },
-                    label = { Text("Search Warehouse Part ID or Keyword") },
-                    placeholder = { Text("Type at least 3 letters (e.g. BRG, seal, HF-40)...") },
-                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                    trailingIcon = {
-                        if (catalogSearchQuery.isNotEmpty()) {
-                            IconButton(onClick = { catalogSearchQuery = "" }) {
-                                Icon(Icons.Filled.Close, contentDescription = "Clear spare part search")
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("complete_task_spare_part_search_input")
+                    placeholder = "Search part ID/code (min 3 letters)...",
+                    searchTag = "complete_task_spare_part_search_input",
+                    modifier = Modifier.fillMaxWidth()
                 )
 
                 val cleanLen = catalogSearchQuery.trim().length
@@ -1219,22 +1206,12 @@ fun SearchableWarehousePartPickerDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                OutlinedTextField(
+                CompactSearchField(
                     value = query,
                     onValueChange = { query = it },
-                    placeholder = { Text("Type 3+ characters (ID/code or description)...") },
-                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                    trailingIcon = {
-                        if (query.isNotEmpty()) {
-                            IconButton(onClick = { query = "" }) {
-                                Icon(Icons.Filled.Close, contentDescription = "Clear search")
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("warehouse_picker_search_input")
+                    placeholder = "Type 3+ characters (ID/code or description)...",
+                    searchTag = "warehouse_picker_search_input",
+                    modifier = Modifier.fillMaxWidth()
                 )
 
                 Text(

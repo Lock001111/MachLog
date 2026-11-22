@@ -24,11 +24,18 @@ import com.example.engine.ReportExportEngine
 import com.example.data.MachineStatus
 import com.example.data.ReminderPriority
 import com.example.data.TaskOutcome
+import com.example.data.TodoReminderEntity
 import com.example.data.formatEngineerList
 import com.example.data.parseEngineerList
 import com.example.engine.AppUpdateChecker
 import com.example.engine.Formatters
+import com.example.ui.HistoryFilterState
+import com.example.ui.TodoFilterState
+import com.example.ui.screens.TodoFeedItem
+import com.example.ui.screens.buildTodoFeedItems
+import com.example.ui.screens.filterAndSortHistoryLogs
 import com.example.ui.screens.filterWarehouseParts
+import com.example.ui.screens.findSparePartUsageHistory
 import com.example.ui.screens.paginateItems
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -580,5 +587,199 @@ class MachinaLogicTest {
         """.trimIndent()
         val decoded = BackupSyncManager.parseBackupJson(jsonWithPrio)
         assertEquals("URGENT", decoded?.tasks?.firstOrNull()?.priority)
+    }
+
+    @Test
+    fun `buildTodoFeedItems merges reminder-enabled tasks and applies filters and date sorting`() {
+        val m1 = MachineEntity(id = 1L, groupId = 10L, assetCode = "MCH-10", name = "Lathe", locationZone = "Bay 1", modelInfo = "L-10")
+        val m2 = MachineEntity(id = 2L, groupId = 20L, assetCode = "MCH-20", name = "Press", locationZone = "Bay 2", modelInfo = "P-20")
+        val machinesById = mapOf(1L to m1, 2L to m2)
+
+        val baseDeadline = 1_800_000_000_000L
+        val tasks = listOf(
+            MaintenanceTaskEntity(
+                id = 100L,
+                machineId = 1L,
+                title = "Spindle Bearing Grease",
+                description = "Use lithium EP2",
+                cadence = Cadence.WEEKLY,
+                deadlineMillis = baseDeadline,
+                personInCharge = "Elena Vance",
+                assistantEngineers = "Marcus Chen",
+                priority = ReminderPriority.HIGH,
+                reminderEnabled = true,
+                reminderLeadHours = 24,
+                createdAtMillis = baseDeadline - 200_000_000L
+            ),
+            MaintenanceTaskEntity(
+                id = 101L,
+                machineId = 2L,
+                title = "Silent Unreminded Check",
+                cadence = Cadence.DAILY,
+                deadlineMillis = baseDeadline,
+                personInCharge = "Marcus Chen",
+                priority = ReminderPriority.URGENT,
+                reminderEnabled = false,
+                reminderLeadHours = 12
+            )
+        )
+        val todos = listOf(
+            TodoReminderEntity(
+                id = 200L,
+                title = "Order Coolant Drums",
+                notes = "Vendor B",
+                machineId = 2L,
+                personInCharge = "Priya Nair",
+                repeatRule = RepeatRule.ONCE,
+                dueAtMillis = baseDeadline - 10_000_000L,
+                priority = ReminderPriority.NORMAL,
+                isCompleted = false
+            ),
+            TodoReminderEntity(
+                id = 201L,
+                title = "Completed Audit Checklist",
+                personInCharge = "Elena Vance",
+                repeatRule = RepeatRule.MONTHLY,
+                dueAtMillis = baseDeadline - 50_000_000L,
+                priority = ReminderPriority.URGENT,
+                isCompleted = true,
+                completedAtMillis = baseDeadline - 40_000_000L
+            )
+        )
+
+        // Default: active standalone + reminderEnabled tasks (unreminded task excluded, completed excluded)
+        val defaultFeed = buildTodoFeedItems(todos, tasks, machinesById, TodoFilterState())
+        assertEquals(2, defaultFeed.size)
+        val linked = defaultFeed.filterIsInstance<TodoFeedItem.LinkedTaskReminder>().single()
+        assertEquals("Spindle Bearing Grease", linked.title)
+        assertEquals(baseDeadline - 24L * 3_600_000L, linked.triggerAtMillis)
+
+        // Show completed includes the completed row at the end
+        val withCompleted = buildTodoFeedItems(todos, tasks, machinesById, TodoFilterState(showCompleted = true))
+        assertEquals(3, withCompleted.size)
+        assertTrue(withCompleted.last().isCompleted)
+
+        // Filter by priority + assistant engineer + group + repeatRule
+        val byAssistantAndGroup = buildTodoFeedItems(
+            todos = todos,
+            tasks = tasks,
+            machinesById = machinesById,
+            filter = TodoFilterState(
+                priority = ReminderPriority.HIGH,
+                picFilter = "Marcus Chen",
+                groupId = 10L,
+                repeatRule = RepeatRule.WEEKLY,
+                searchQuery = "spindle"
+            )
+        )
+        assertEquals(1, byAssistantAndGroup.size)
+        assertEquals("Spindle Bearing Grease", byAssistantAndGroup.first().title)
+
+        // Descending sort places Order Coolant Drums (deadline - 10M) before Spindle trigger (deadline - 86.4M)
+        val descFeed = buildTodoFeedItems(todos, tasks, machinesById, TodoFilterState(sortAscending = false))
+        assertEquals("Order Coolant Drums", descFeed.first().title)
+    }
+
+    @Test
+    fun `filterAndSortHistoryLogs filters by priority, outcome, cadence, group, engineer, query and sorts by date`() {
+        val m1 = MachineEntity(id = 1L, groupId = 10L, assetCode = "MCH-10", name = "Lathe", locationZone = "Bay 1", modelInfo = "L-10")
+        val m2 = MachineEntity(id = 2L, groupId = 20L, assetCode = "MCH-20", name = "Press", locationZone = "Bay 2", modelInfo = "P-20")
+        val machinesById = mapOf(1L to m1, 2L to m2)
+
+        val l1 = ServiceLogWithParts(
+            log = ServiceLogEntity(
+                id = 1L,
+                machineId = 1L,
+                entryType = ServiceEntryType.PREVENTIVE_SERVICE,
+                outcome = TaskOutcome.DONE,
+                cadenceSnapshot = Cadence.WEEKLY,
+                prioritySnapshot = ReminderPriority.HIGH,
+                summaryTitle = "Replace Spindle Filter",
+                personInCharge = "Elena Vance",
+                assistantEngineers = "Priya Nair",
+                serviceDurationMinutes = 35,
+                completedAtMillis = 1_700_000_000_000L,
+                createdAtMillis = 1_699_900_000_000L
+            ),
+            parts = listOf(
+                SparePartUsedEntity(id = 10L, serviceLogId = 1L, partName = "Spindle Filter", partCode = "SF-100", quantity = 1, unit = "pcs")
+            )
+        )
+        val l2 = ServiceLogWithParts(
+            log = ServiceLogEntity(
+                id = 2L,
+                machineId = 2L,
+                entryType = ServiceEntryType.PREVENTIVE_SERVICE,
+                outcome = TaskOutcome.REJECTED,
+                cadenceSnapshot = Cadence.MONTHLY,
+                prioritySnapshot = ReminderPriority.URGENT,
+                summaryTitle = "Hydraulic Valve Rebuild",
+                rejectionReason = "Production bottleneck",
+                personInCharge = "Marcus Chen",
+                serviceDurationMinutes = 0,
+                completedAtMillis = 1_700_050_000_000L,
+                createdAtMillis = 1_699_950_000_000L
+            )
+        )
+
+        val sortedAsc = filterAndSortHistoryLogs(listOf(l1, l2), machinesById, HistoryFilterState(sortAscending = true))
+        assertEquals(listOf(1L, 2L), sortedAsc.map { it.log.id })
+
+        val sortedDesc = filterAndSortHistoryLogs(listOf(l1, l2), machinesById, HistoryFilterState(sortAscending = false))
+        assertEquals(listOf(2L, 1L), sortedDesc.map { it.log.id })
+
+        val filteredDone = filterAndSortHistoryLogs(
+            serviceLogs = listOf(l1, l2),
+            machinesById = machinesById,
+            filter = HistoryFilterState(
+                outcome = TaskOutcome.DONE,
+                priority = ReminderPriority.HIGH,
+                cadence = Cadence.WEEKLY,
+                groupId = 10L,
+                picFilter = "Priya Nair",
+                searchQuery = "SF-100"
+            )
+        )
+        assertEquals(1, filteredDone.size)
+        assertEquals(1L, filteredDone.first().log.id)
+    }
+
+    @Test
+    fun `findSparePartUsageHistory returns machines where part was used sorted newest first`() {
+        val m1 = MachineEntity(id = 1L, assetCode = "MCH-10", name = "Lathe", locationZone = "Bay 1", modelInfo = "L-10")
+        val m2 = MachineEntity(id = 2L, assetCode = "MCH-20", name = "Press", locationZone = "Bay 2", modelInfo = "P-20")
+        val targetPart = WarehousePartEntity(id = 5L, partCode = "BRG-6205", partName = "Bearing 6205", defaultUnit = "pcs")
+
+        val older = ServiceLogWithParts(
+            log = ServiceLogEntity(
+                id = 1L, machineId = 1L, entryType = ServiceEntryType.PREVENTIVE_SERVICE,
+                summaryTitle = "Lathe Bearing Swap", personInCharge = "Elena Vance",
+                serviceDurationMinutes = 40, completedAtMillis = 1_700_000_000_000L
+            ),
+            parts = listOf(SparePartUsedEntity(id = 1L, serviceLogId = 1L, partName = "Bearing 6205", partCode = "brg-6205", quantity = 2, unit = "pcs"))
+        )
+        val newer = ServiceLogWithParts(
+            log = ServiceLogEntity(
+                id = 2L, machineId = 2L, entryType = ServiceEntryType.PREVENTIVE_SERVICE,
+                summaryTitle = "Press Roller Replacement", personInCharge = "Marcus Chen",
+                serviceDurationMinutes = 55, completedAtMillis = 1_700_100_000_000L
+            ),
+            parts = listOf(SparePartUsedEntity(id = 2L, serviceLogId = 2L, partName = "Bearing 6205", partCode = "", quantity = 4, unit = "pcs"))
+        )
+        val unrelated = ServiceLogWithParts(
+            log = ServiceLogEntity(
+                id = 3L, machineId = 2L, entryType = ServiceEntryType.PREVENTIVE_SERVICE,
+                summaryTitle = "Belt Swap", personInCharge = "Marcus Chen",
+                serviceDurationMinutes = 20, completedAtMillis = 1_700_200_000_000L
+            ),
+            parts = listOf(SparePartUsedEntity(id = 3L, serviceLogId = 3L, partName = "Drive Belt", partCode = "BLT-1", quantity = 1, unit = "pcs"))
+        )
+
+        val history = findSparePartUsageHistory(targetPart, listOf(older, newer, unrelated), mapOf(1L to m1, 2L to m2))
+        assertEquals(2, history.size)
+        assertEquals("MCH-20", history[0].machine?.assetCode)
+        assertEquals(4, history[0].usedPart.quantity)
+        assertEquals("MCH-10", history[1].machine?.assetCode)
+        assertEquals(2, history[1].usedPart.quantity)
     }
 }

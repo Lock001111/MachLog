@@ -63,7 +63,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -362,7 +364,15 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                                         )
                                     }
                                 },
-                                label = { Text(stringResource(dest.labelRes)) },
+                                label = {
+                                    Text(
+                                        text = stringResource(dest.labelRes),
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis,
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp)
+                                    )
+                                },
                                 modifier = Modifier.testTag("nav_tab_${dest.route}")
                             )
                         }
@@ -456,7 +466,15 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                                         )
                                     }
                                 },
-                                label = { Text(stringResource(dest.labelRes)) },
+                                label = {
+                                    Text(
+                                        text = stringResource(dest.labelRes),
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis,
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp)
+                                    )
+                                },
                                 modifier = Modifier.testTag("rail_tab_${dest.route}")
                             )
                         }
@@ -514,6 +532,7 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                                     showTodoEditor = true
                                 },
                                 onDeleteTodo = { todo -> viewModel.deleteTodo(todo.id) },
+                                onUpdateHistoryFilter = viewModel::updateHistoryFilter,
                                 onDeleteLog = viewModel::deleteServiceLog
                             )
                         }
@@ -598,6 +617,11 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                                     viewModel.focusEngineerTasks(engName)
                                     tasksSubTab = 0
                                     navigateToTab(ROUTE_TASKS)
+                                },
+                                onViewEngineerHistoryInTab = { engName ->
+                                    viewModel.focusEngineerHistory(engName)
+                                    tasksSubTab = 2
+                                    navigateToTab(ROUTE_TASKS)
                                 }
                             )
                         }
@@ -634,8 +658,8 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                 viewModel.deleteTask(taskId)
                 showTaskEditor = false
             },
-            onSave = { id, uuid, machineId, groupId, title, desc, cadence, priority, deadline, estMin, pic, assistants, remOn, leadHrs, lastComp ->
-                viewModel.saveTask(id, uuid, machineId, groupId, title, desc, cadence, priority, deadline, estMin, pic, assistants, remOn, leadHrs, lastComp)
+            onSave = { id, uuid, machineId, groupId, title, desc, cadence, priority, deadline, estMin, pic, assistants, remOn, leadHrs, lastComp, machineStatus ->
+                viewModel.saveTask(id, uuid, machineId, groupId, title, desc, cadence, priority, deadline, estMin, pic, assistants, remOn, leadHrs, lastComp, machineStatus)
                 showTaskEditor = false
             }
         )
@@ -649,8 +673,8 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
             engineers = state.engineers,
             warehouseCatalog = state.warehouseParts,
             onDismiss = { completingTask = null },
-            onSubmit = { pic, assistants, actualMin, notes, spareParts, flagMalfunction, severity ->
-                viewModel.completeTask(task.id, pic, assistants, actualMin, notes, spareParts, flagMalfunction, severity)
+            onSubmit = { pic, assistants, actualMin, notes, spareParts ->
+                viewModel.completeTask(task.id, pic, assistants, actualMin, notes, spareParts)
                 completingTask = null
             }
         )

@@ -147,6 +147,7 @@ object ReportExportEngine {
                 CellValue.Text("Task Title"),
                 CellValue.Text("Priority"),
                 CellValue.Text("Cadence"),
+                CellValue.Text("Created At"),
                 CellValue.Text("Deadline"),
                 CellValue.Text("Status"),
                 CellValue.Text("Person In Charge"),
@@ -166,6 +167,7 @@ object ReportExportEngine {
                 CellValue.Text(t.title),
                 CellValue.Text(t.priority.label),
                 CellValue.Text(t.cadence.label),
+                CellValue.Text(Formatters.formatIsoDateTime(t.createdAtMillis)),
                 CellValue.Text(Formatters.formatIsoDateTime(t.deadlineMillis)),
                 CellValue.Text(status),
                 CellValue.Text(t.personInCharge),
@@ -177,8 +179,10 @@ object ReportExportEngine {
 
         val logRows = mutableListOf<List<CellValue>>(
             listOf(
+                CellValue.Text("Created At"),
                 CellValue.Text("Recorded Date"),
                 CellValue.Text("Outcome"),
+                CellValue.Text("Priority"),
                 CellValue.Text("Type"),
                 CellValue.Text("Severity"),
                 CellValue.Text("Asset Code"),
@@ -214,8 +218,10 @@ object ReportExportEngine {
                 l.malfunctionDetails
             }
             logRows += listOf(
+                CellValue.Text(Formatters.formatIsoDateTime(l.createdAtMillis)),
                 CellValue.Text(Formatters.formatIsoDateTime(l.completedAtMillis)),
                 CellValue.Text(l.outcome.label),
+                CellValue.Text(l.prioritySnapshot?.label ?: "-"),
                 CellValue.Text(l.entryType.label),
                 CellValue.Text(l.severity.label),
                 CellValue.Text(m?.assetCode ?: "-"),
@@ -413,7 +419,7 @@ object ReportExportEngine {
                     )
                     y += 12f
                     canvas.drawText(
-                        "Status: $state (${Formatters.formatDateTime(t.deadlineMillis)})  |  PIC: ${t.personInCharge}$asstStr  |  Est: ${Formatters.formatDuration(t.estimatedMinutes)}",
+                        "Status: $state (${Formatters.formatDateTime(t.deadlineMillis)})  |  Created: ${Formatters.formatDateTime(t.createdAtMillis)}  |  PIC: ${t.personInCharge}$asstStr",
                         margin + 8f,
                         y,
                         mutedPaint
@@ -447,7 +453,7 @@ object ReportExportEngine {
                     )
                     y += 12f
                     canvas.drawText(
-                        "Date: ${Formatters.formatDateTime(l.completedAtMillis)}  |  PIC: ${l.personInCharge}$asstStr  |  Time: ${Formatters.formatDuration(l.serviceDurationMinutes)}",
+                        "Created: ${Formatters.formatDateTime(l.createdAtMillis)}  |  Recorded: ${Formatters.formatDateTime(l.completedAtMillis)}  |  PIC: ${l.personInCharge}$asstStr",
                         margin + 8f,
                         y,
                         mutedPaint

@@ -27,13 +27,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderSpecial
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.PrecisionManufacturing
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.TableView
 import androidx.compose.material.icons.filled.Warning
@@ -48,7 +46,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -81,6 +78,7 @@ import com.example.ui.MachinaUiState
 import com.example.ui.MachineFilterState
 import com.example.ui.MachineGroupBy
 import com.example.ui.components.CadencePill
+import com.example.ui.components.CompactSearchField
 import com.example.ui.components.EmptyStateCard
 import com.example.ui.components.GroupBadge
 import com.example.ui.components.MachineStatusBadge
@@ -293,23 +291,13 @@ private fun MachineListPane(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    OutlinedTextField(
+                    CompactSearchField(
                         value = filter.searchQuery,
                         onValueChange = { q -> onUpdateFilter { it.copy(searchQuery = q) } },
-                        placeholder = { Text("Search asset code, machine, zone...") },
-                        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Search machines") },
-                        trailingIcon = {
-                            if (filter.searchQuery.isNotEmpty()) {
-                                IconButton(onClick = { onUpdateFilter { it.copy(searchQuery = "") } }) {
-                                    Icon(Icons.Filled.Clear, contentDescription = "Clear search")
-                                }
-                            }
-                        },
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("machines_search_input")
+                        placeholder = "Search asset code, machine, zone...",
+                        searchTag = "machines_search_input",
+                        contentDescription = "Search machines",
+                        modifier = Modifier.weight(1f)
                     )
 
                     Box {
@@ -714,6 +702,11 @@ private fun MachineDetailPane(
                             }
                             Text(task.title, style = MaterialTheme.typography.titleSmall)
                             Text(
+                                text = "Created: ${Formatters.formatDateTime(task.createdAtMillis)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
                                 text = buildString {
                                     append("PIC: ${task.personInCharge}")
                                     if (task.assistantEngineers.isNotBlank()) {
@@ -811,6 +804,11 @@ private fun MachineHistoryMiniCard(item: ServiceLogWithParts) {
                 )
             }
             Text(log.summaryTitle, style = MaterialTheme.typography.titleSmall)
+            Text(
+                text = "Created: ${Formatters.formatDateTime(log.createdAtMillis)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             if (isRejected && log.rejectionReason.isNotBlank()) {
                 Text(
                     text = "Rejection Reason: ${log.rejectionReason}",

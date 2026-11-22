@@ -19,7 +19,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         WarehousePartEntity::class,
         EngineerEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -111,6 +111,19 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE maintenance_tasks ADD COLUMN createdAtMillis INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE todo_reminders ADD COLUMN createdAtMillis INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE service_logs ADD COLUMN createdAtMillis INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE service_logs ADD COLUMN prioritySnapshot TEXT")
+
+                db.execSQL("UPDATE maintenance_tasks SET createdAtMillis = CASE WHEN updatedAtMillis > 0 THEN updatedAtMillis ELSE deadlineMillis END WHERE createdAtMillis = 0")
+                db.execSQL("UPDATE todo_reminders SET createdAtMillis = CASE WHEN updatedAtMillis > 0 THEN updatedAtMillis ELSE dueAtMillis END WHERE createdAtMillis = 0")
+                db.execSQL("UPDATE service_logs SET createdAtMillis = CASE WHEN completedAtMillis > 0 THEN completedAtMillis ELSE updatedAtMillis END WHERE createdAtMillis = 0")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -118,7 +131,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "machinalog.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .build()
                     .also { INSTANCE = it }
             }

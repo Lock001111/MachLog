@@ -344,10 +344,10 @@ object LocalWebServerManager {
                                 WebMachineDto(it.id, it.uuid, it.groupId, it.assetCode, it.name, it.locationZone, it.modelInfo, it.status.name, it.notes)
                             },
                             tasks = tasks.map {
-                                WebTaskDto(it.id, it.uuid, it.machineId, it.groupId, it.title, it.description, it.cadence.name, it.deadlineMillis, it.estimatedMinutes, it.personInCharge, it.assistantEngineers, it.priority.name, it.reminderEnabled, it.reminderLeadHours, it.lastCompletedMillis)
+                                WebTaskDto(it.id, it.uuid, it.machineId, it.groupId, it.title, it.description, it.cadence.name, it.deadlineMillis, it.estimatedMinutes, it.personInCharge, it.assistantEngineers, it.priority.name, it.reminderEnabled, it.reminderLeadHours, it.lastCompletedMillis, it.createdAtMillis)
                             },
                             todos = todos.map {
-                                WebTodoDto(it.id, it.uuid, it.title, it.notes, it.machineId, it.groupId, it.personInCharge, it.repeatRule.name, it.dueAtMillis, it.reminderEnabled, it.isCompleted, it.priority.name, it.completedAtMillis)
+                                WebTodoDto(it.id, it.uuid, it.title, it.notes, it.machineId, it.groupId, it.personInCharge, it.repeatRule.name, it.dueAtMillis, it.reminderEnabled, it.isCompleted, it.priority.name, it.completedAtMillis, it.createdAtMillis)
                             },
                             warehouseParts = warehouse.map {
                                 WebWarehousePartDto(it.id, it.uuid, it.partCode, it.partName, it.partDescription, it.defaultUnit)
@@ -364,6 +364,7 @@ object LocalWebServerManager {
                                     taskId = l.taskId,
                                     entryType = l.entryType.name,
                                     cadenceSnapshot = l.cadenceSnapshot?.name,
+                                    prioritySnapshot = l.prioritySnapshot?.name,
                                     summaryTitle = l.summaryTitle,
                                     malfunctionDetails = l.malfunctionDetails,
                                     severity = l.severity.name,
@@ -374,6 +375,7 @@ object LocalWebServerManager {
                                     serviceDurationMinutes = l.serviceDurationMinutes,
                                     completedAtMillis = l.completedAtMillis,
                                     deadlineWasMet = l.deadlineWasMet,
+                                    createdAtMillis = l.createdAtMillis,
                                     parts = item.parts.map { p ->
                                         WebSparePartUsedDto(p.partCode, p.partName, p.partDescription, p.fromWarehouse, p.quantity, p.unit)
                                     }
@@ -498,8 +500,11 @@ object LocalWebServerManager {
                     val existing = if (body.id != 0L) dao.getTaskById(body.id) else null
                     val cadence = runCatching { Cadence.valueOf(body.cadence) }.getOrDefault(Cadence.ONCE)
                     val prio = runCatching { ReminderPriority.valueOf(body.priority) }.getOrDefault(ReminderPriority.NORMAL)
+                    val targetStatus = body.machineStatus?.let { raw ->
+                        runCatching { MachineStatus.valueOf(raw) }.getOrNull()
+                    }
                     repo.saveTask(
-                        MaintenanceTaskEntity(
+                        task = MaintenanceTaskEntity(
                             id = existing?.id ?: 0L,
                             uuid = existing?.uuid ?: java.util.UUID.randomUUID().toString(),
                             machineId = body.machineId,
@@ -514,8 +519,10 @@ object LocalWebServerManager {
                             priority = prio,
                             reminderEnabled = body.reminderEnabled,
                             reminderLeadHours = body.reminderLeadHours.coerceAtLeast(1),
-                            lastCompletedMillis = existing?.lastCompletedMillis
-                        )
+                            lastCompletedMillis = existing?.lastCompletedMillis,
+                            createdAtMillis = existing?.createdAtMillis ?: System.currentTimeMillis()
+                        ),
+                        machineStatus = targetStatus
                     )
                     jsonResponse(200, "OK", WebActionResult(true, "Task saved"))
                 }
@@ -550,7 +557,8 @@ object LocalWebServerManager {
                             reminderEnabled = body.reminderEnabled,
                             isCompleted = existing?.isCompleted ?: false,
                             priority = prio,
-                            completedAtMillis = existing?.completedAtMillis
+                            completedAtMillis = existing?.completedAtMillis,
+                            createdAtMillis = existing?.createdAtMillis ?: System.currentTimeMillis()
                         )
                     )
                     jsonResponse(200, "OK", WebActionResult(true, "To-Do saved"))

@@ -618,6 +618,7 @@ object ExcelImportEngine {
                     priority = t.priority,
                     reminderEnabled = t.reminderEnabled,
                     reminderLeadHours = t.reminderLeadHours.coerceAtLeast(1),
+                    createdAtMillis = now,
                     updatedAtMillis = now
                 )
                 val id = dao.insertTask(entity)
@@ -694,6 +695,7 @@ object ExcelImportEngine {
                     dueAtMillis = td.dueAtMillis,
                     priority = td.priority,
                     reminderEnabled = true,
+                    createdAtMillis = now,
                     updatedAtMillis = now
                 )
                 val id = dao.insertTodo(entity)

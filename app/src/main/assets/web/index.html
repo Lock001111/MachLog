@@ -164,6 +164,14 @@
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
     th { font-size: 11px; text-transform: uppercase; color: var(--muted); background: var(--surface-alt); }
+    th.sortable-th { cursor: pointer; user-select: none; white-space: nowrap; }
+    th.sortable-th:hover { color: var(--primary); background: var(--primary-soft); }
+    th.sortable-th .sort-ind { margin-left: 4px; font-size: 10px; opacity: 0.85; }
+    tr.group-row td {
+      background: var(--surface-alt); font-weight: 700; font-size: 13px;
+      cursor: pointer; border-top: 2px solid var(--border); border-bottom: 1px solid var(--border);
+    }
+    tr.group-row:hover td { background: var(--primary-soft); }
     .modal-backdrop {
       position: fixed; inset: 0; background: rgba(6, 14, 24, 0.58);
       display: none; align-items: center; justify-content: center; padding: 16px; z-index: 50;
@@ -171,7 +179,7 @@
     .modal-backdrop.open { display: flex; }
     .modal {
       background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
-      width: 100%; max-width: 640px; max-height: 90vh; display: flex; flex-direction: column; overflow: hidden;
+      width: 100%; max-width: 680px; max-height: 90vh; display: flex; flex-direction: column; overflow: hidden;
     }
     .modal-header { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
     .modal-body { padding: 16px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
@@ -225,13 +233,7 @@
       </div>
     </header>
 
-    <section class="kpi-strip">
-      <div class="kpi"><div class="lbl">Machines</div><div class="val" id="kpi-machines">0</div></div>
-      <div class="kpi"><div class="lbl">Overdue Tasks</div><div class="val" id="kpi-overdue" style="color:var(--danger)">0</div></div>
-      <div class="kpi"><div class="lbl">Open To-Dos</div><div class="val" id="kpi-todos">0</div></div>
-      <div class="kpi"><div class="lbl">Engineers</div><div class="val" id="kpi-engineers">0</div></div>
-      <div class="kpi"><div class="lbl">History Logs</div><div class="val" id="kpi-logs">0</div></div>
-    </section>
+    <section class="kpi-strip" id="top-kpi-strip"></section>
 
     <section class="content" id="view-root"></section>
   </main>
@@ -261,20 +263,36 @@ const appState = {
   taskPriority: 'ALL',
   taskPic: 'ALL',
   taskGroupId: 'ALL',
-  taskSort: 'ASC',
+  taskGroupBy: 'CUSTOM_GROUP',
+  collapsedTaskGroups: {},
   taskOverdueOnly: false,
   taskSearch: '',
   todoRepeat: 'ALL',
+  todoPriority: 'ALL',
+  todoPic: 'ALL',
+  todoGroupId: 'ALL',
+  todoSearch: '',
   todoShowDone: false,
   todoPageSize: 25,
   todoPage: 0,
   historyOutcome: 'ALL',
+  historyPriority: 'ALL',
+  historyCadence: 'ALL',
+  historyPic: 'ALL',
+  historyGroupId: 'ALL',
   historySearch: '',
   machineStatus: 'ALL',
   machineSearch: '',
   selectedMachineId: null,
   partSearch: '',
   engineerSearch: '',
+  colSorts: {
+    tasks: { key: 'deadline', dir: 'ASC' },
+    todos: { key: 'trigger', dir: 'ASC' },
+    history: { key: 'recorded', dir: 'DESC' },
+    warehouse: { key: 'partCode', dir: 'ASC' },
+    engineers: { key: 'name', dir: 'ASC' }
+  },
   reportFilter: { machineId: '', groupId: '', pic: '', cadence: '', outcome: '', start: '', end: '' },
   draftParts: [],
   updateStatusText: '',
@@ -362,25 +380,149 @@ async function refreshState() {
   }
 }
 
+function buildTodoFeedList(d) {
+  const mMap = byIdMap(d.machines);
+  const standalone = (d.todos || []).map(td => ({
+    kind: 'TODO',
+    id: td.id,
+    title: td.title || '',
+    notes: td.notes || '',
+    repeatLabel: td.repeatRule || 'ONCE',
+    priority: td.priority || 'NORMAL',
+    machineId: td.machineId || null,
+    groupId: td.groupId || (td.machineId && mMap[td.machineId] ? mMap[td.machineId].groupId : null),
+    personInCharge: td.personInCharge || '',
+    assistantEngineers: '',
+    createdAtMillis: td.createdAtMillis || td.dueAtMillis || 0,
+    triggerAtMillis: td.dueAtMillis || 0,
+    dueAtMillis: td.dueAtMillis || 0,
+    isCompleted: Boolean(td.isCompleted),
+    completedAtMillis: td.completedAtMillis || null,
+    reminderEnabled: Boolean(td.reminderEnabled),
+    raw: td
+  }));
+  const linked = (d.tasks || []).filter(t => t.reminderEnabled).map(t => {
+    const leadHrs = Math.max(1, Number(t.reminderLeadHours) || 24);
+    const triggerAt = (t.deadlineMillis || 0) - leadHrs * 3600 * 1000;
+    return {
+      kind: 'TASK',
+      id: t.id,
+      title: t.title || '',
+      notes: t.description || '',
+      repeatLabel: t.cadence || 'ONCE',
+      priority: t.priority || 'NORMAL',
+      machineId: t.machineId,
+      groupId: t.groupId || (mMap[t.machineId] ? mMap[t.machineId].groupId : null),
+      personInCharge: t.personInCharge || '',
+      assistantEngineers: t.assistantEngineers || '',
+      createdAtMillis: t.createdAtMillis || 0,
+      triggerAtMillis: triggerAt,
+      dueAtMillis: t.deadlineMillis || 0,
+      isCompleted: false,
+      completedAtMillis: null,
+      reminderEnabled: true,
+      raw: t
+    };
+  });
+  return standalone.concat(linked);
+}
+
+function renderTopKpis() {
+  const strip = document.getElementById('top-kpi-strip');
+  const d = appState.data;
+  if (!strip || !d) return;
+  const now = Date.now();
+  let cards = [];
+
+  if (appState.tab === 'tasks' && appState.taskSubTab === 'active') {
+    const total = d.tasks.length;
+    const overdue = d.tasks.filter(t => t.deadlineMillis < now).length;
+    const openOnSchedule = d.tasks.filter(t => t.deadlineMillis >= now).length;
+    const approaching = d.tasks.filter(t => {
+      if (t.deadlineMillis < now) return false;
+      const leadMs = Math.max(1, Number(t.reminderLeadHours) || 24) * 3600 * 1000;
+      return (t.deadlineMillis - now <= 24 * 3600 * 1000) || (t.reminderEnabled && (t.deadlineMillis - leadMs <= now));
+    }).length;
+    cards = [
+      { lbl: 'Total Tasks', val: total, color: '' },
+      { lbl: 'Open Tasks', val: openOnSchedule, color: 'var(--primary)' },
+      { lbl: 'Overdue Tasks', val: overdue, color: overdue > 0 ? 'var(--danger)' : 'var(--ok)' },
+      { lbl: 'Approaching Deadline', val: approaching, color: approaching > 0 ? 'var(--warn)' : '' }
+    ];
+  } else if (appState.tab === 'tasks' && appState.taskSubTab === 'todos') {
+    const feed = buildTodoFeedList(d);
+    const openList = feed.filter(x => !x.isCompleted);
+    const overdue = openList.filter(x => x.dueAtMillis < now).length;
+    const openOnSchedule = openList.filter(x => x.dueAtMillis >= now).length;
+    const approaching = openList.filter(x => x.dueAtMillis >= now && (x.triggerAtMillis <= now || (x.dueAtMillis - now <= 24 * 3600 * 1000))).length;
+    cards = [
+      { lbl: 'Total To-Dos', val: feed.length, color: '' },
+      { lbl: 'Open To-Dos', val: openOnSchedule, color: 'var(--primary)' },
+      { lbl: 'Overdue To-Dos', val: overdue, color: overdue > 0 ? 'var(--danger)' : 'var(--ok)' },
+      { lbl: 'Approaching Deadline', val: approaching, color: approaching > 0 ? 'var(--warn)' : '' }
+    ];
+  } else if (appState.tab === 'tasks' && appState.taskSubTab === 'history') {
+    const total = d.serviceLogs.length;
+    const done = d.serviceLogs.filter(l => l.outcome === 'DONE').length;
+    const rejected = d.serviceLogs.filter(l => l.outcome === 'REJECTED').length;
+    const totalMins = d.serviceLogs.reduce((acc, l) => acc + (Number(l.serviceDurationMinutes) || 0), 0);
+    cards = [
+      { lbl: 'History Records', val: total, color: '' },
+      { lbl: 'Completed (Done)', val: done, color: 'var(--ok)' },
+      { lbl: 'Rejected', val: rejected, color: rejected > 0 ? 'var(--danger)' : '' },
+      { lbl: 'Service Hours Logged', val: (Math.round((totalMins / 60) * 10) / 10) + 'h', color: 'var(--primary)' }
+    ];
+  } else if (appState.tab === 'machines') {
+    const operational = d.machines.filter(m => m.status === 'OPERATIONAL').length;
+    const maintDue = d.machines.filter(m => m.status === 'MAINTENANCE_DUE').length;
+    const malfunction = d.machines.filter(m => m.status === 'MALFUNCTION').length;
+    cards = [
+      { lbl: 'Total Machines', val: d.machines.length, color: '' },
+      { lbl: 'Operational', val: operational, color: 'var(--ok)' },
+      { lbl: 'Maintenance Due', val: maintDue, color: maintDue > 0 ? 'var(--warn)' : '' },
+      { lbl: 'Malfunction', val: malfunction, color: malfunction > 0 ? 'var(--danger)' : '' }
+    ];
+  } else if (appState.tab === 'warehouse') {
+    const usageCount = d.serviceLogs.reduce((acc, l) => acc + ((l.parts || []).length), 0);
+    cards = [
+      { lbl: 'Warehouse Spare Parts', val: d.warehouseParts.length, color: 'var(--primary)' },
+      { lbl: 'Historical Part Uses', val: usageCount, color: '' }
+    ];
+  } else if (appState.tab === 'engineers') {
+    const engs = d.engineers || [];
+    const done = d.serviceLogs.filter(l => l.outcome === 'DONE').length;
+    cards = [
+      { lbl: 'Registered Engineers', val: engs.length, color: 'var(--primary)' },
+      { lbl: 'Active Task Assignments', val: d.tasks.length, color: 'var(--warn)' },
+      { lbl: 'Historical Jobs Done', val: done, color: 'var(--ok)' }
+    ];
+  } else {
+    cards = [
+      { lbl: 'Active Tasks', val: d.tasks.length, color: '' },
+      { lbl: 'History Reports', val: d.serviceLogs.length, color: 'var(--ok)' },
+      { lbl: 'Custom Groups', val: d.groups.length, color: 'var(--primary)' },
+      { lbl: 'App Version', val: 'v' + (d.appVersionName || '1.0'), color: '' }
+    ];
+  }
+
+  strip.innerHTML = cards.map(c =>
+    `<div class="kpi"><div class="lbl">${esc(c.lbl)}</div><div class="val" ${c.color ? `style="color:${c.color}"` : ''}>${esc(c.val)}</div></div>`
+  ).join('');
+}
+
 function updateKpis() {
   const d = appState.data;
   if (!d) return;
   const now = Date.now();
   const overdueTasks = d.tasks.filter(t => t.deadlineMillis < now).length;
   const overdueTodos = d.todos.filter(td => !td.isCompleted && td.dueAtMillis < now).length;
-  const openTodos = d.todos.filter(td => !td.isCompleted).length;
   const engineersCount = (d.engineers || []).length;
-
-  document.getElementById('kpi-machines').textContent = d.machines.length;
-  document.getElementById('kpi-overdue').textContent = overdueTasks;
-  document.getElementById('kpi-todos').textContent = openTodos;
-  document.getElementById('kpi-engineers').textContent = engineersCount;
-  document.getElementById('kpi-logs').textContent = d.serviceLogs.length;
 
   document.getElementById('nav-badge-tasks').textContent = (overdueTasks + overdueTodos) || d.tasks.length;
   document.getElementById('nav-badge-machines').textContent = d.machines.length;
   document.getElementById('nav-badge-parts').textContent = d.warehouseParts.length;
   document.getElementById('nav-badge-engineers').textContent = engineersCount;
+  renderTopKpis();
 }
 
 function switchTab(tab) {
@@ -488,9 +630,46 @@ function getCheckedAssistants(prefix) {
     .filter(name => name.toLowerCase() !== pic.toLowerCase());
 }
 
+function toggleColSort(section, key) {
+  const cur = appState.colSorts[section] || { key, dir: 'ASC' };
+  if (cur.key === key) {
+    cur.dir = cur.dir === 'ASC' ? 'DESC' : 'ASC';
+  } else {
+    cur.key = key;
+    cur.dir = (key === 'recorded' || key === 'created') ? 'DESC' : 'ASC';
+  }
+  appState.colSorts[section] = cur;
+  renderTab();
+}
+
+function sortableTh(section, key, label) {
+  const cur = appState.colSorts[section];
+  const active = cur && cur.key === key;
+  const ind = active ? (cur.dir === 'ASC' ? '▲' : '▼') : '⇅';
+  return `<th class="sortable-th" title="Click to sort by ${esc(label)}" onclick="toggleColSort('${section}','${key}')">${esc(label)}<span class="sort-ind">${ind}</span></th>`;
+}
+
+function priorityRank(p) {
+  const u = String(p || 'NORMAL').toUpperCase();
+  if (u === 'URGENT') return 3;
+  if (u === 'HIGH') return 2;
+  return 1;
+}
+
+function cmpValues(a, b, dir) {
+  let res = 0;
+  if (typeof a === 'number' && typeof b === 'number') {
+    res = a - b;
+  } else {
+    res = String(a || '').localeCompare(String(b || ''), undefined, { sensitivity: 'base', numeric: true });
+  }
+  return dir === 'DESC' ? -res : res;
+}
+
 function renderTab() {
   const d = appState.data;
   if (!d) return;
+  renderTopKpis();
   const root = document.getElementById('view-root');
   if (appState.tab === 'tasks') renderTasks(root, d);
   else if (appState.tab === 'machines') renderMachines(root, d);
@@ -501,11 +680,11 @@ function renderTab() {
 
 // --- 1. UNIFIED TASKS, TO-DO REMINDERS & HISTORY ---
 function renderTasks(root, d) {
-  const openTodos = d.todos.filter(td => !td.isCompleted).length;
+  const openTodosCount = (d.todos || []).filter(td => !td.isCompleted).length + (d.tasks || []).filter(t => t.reminderEnabled).length;
   const subtabsHtml = `
     <div class="subtabs">
       <button class="subtab ${appState.taskSubTab==='active'?'active':''}" onclick="appState.taskSubTab='active'; renderTab()">Active Tasks (${d.tasks.length})</button>
-      <button class="subtab ${appState.taskSubTab==='todos'?'active':''}" onclick="appState.taskSubTab='todos'; renderTab()">To-Do Reminders (${openTodos})</button>
+      <button class="subtab ${appState.taskSubTab==='todos'?'active':''}" onclick="appState.taskSubTab='todos'; renderTab()">To-Do Reminders (${openTodosCount})</button>
       <button class="subtab ${appState.taskSubTab==='history'?'active':''}" onclick="appState.taskSubTab='history'; renderTab()">Task History (${d.serviceLogs.length})</button>
     </div>`;
 
@@ -523,6 +702,8 @@ function renderTasks(root, d) {
   const now = Date.now();
   const q = appState.taskSearch.trim().toLowerCase();
   const picNames = [...new Set((d.engineers || []).map(e => e.name).concat(d.tasks.map(t => t.personInCharge)).filter(Boolean))].sort();
+  const tSort = appState.colSorts.tasks || { key: 'deadline', dir: 'ASC' };
+
   const filtered = d.tasks.filter(t => {
     const m = mMap[t.machineId];
     const effGroupId = t.groupId || m?.groupId || null;
@@ -541,14 +722,131 @@ function renderTasks(root, d) {
       if (!hay.includes(q)) return false;
     }
     return true;
-  }).sort((a, b) => appState.taskSort === 'DESC' ? (b.deadlineMillis - a.deadlineMillis) : (a.deadlineMillis - b.deadlineMillis));
+  }).sort((a, b) => {
+    const mA = mMap[a.machineId];
+    const mB = mMap[b.machineId];
+    switch (tSort.key) {
+      case 'priority': {
+        const pr = cmpValues(priorityRank(a.priority), priorityRank(b.priority), tSort.dir);
+        return pr !== 0 ? pr : String(a.cadence).localeCompare(String(b.cadence));
+      }
+      case 'machine':
+        return cmpValues(`${mA?.assetCode || ''} ${mA?.name || ''}`, `${mB?.assetCode || ''} ${mB?.name || ''}`, tSort.dir);
+      case 'title':
+        return cmpValues(a.title, b.title, tSort.dir);
+      case 'created':
+        return cmpValues(a.createdAtMillis || 0, b.createdAtMillis || 0, tSort.dir);
+      case 'pic':
+        return cmpValues(a.personInCharge, b.personInCharge, tSort.dir);
+      case 'est':
+        return cmpValues(Number(a.estimatedMinutes) || 0, Number(b.estimatedMinutes) || 0, tSort.dir);
+      case 'deadline':
+      default:
+        return cmpValues(a.deadlineMillis || 0, b.deadlineMillis || 0, tSort.dir);
+    }
+  });
+
+  // Group rows based on appState.taskGroupBy
+  const sections = [];
+  if (appState.taskGroupBy === 'NONE') {
+    sections.push({ title: 'All Tasks', tasks: filtered });
+  } else {
+    const groupBucket = new Map();
+    filtered.forEach(t => {
+      const m = mMap[t.machineId];
+      let gTitle = 'Ungrouped';
+      if (appState.taskGroupBy === 'CADENCE') gTitle = `${t.cadence} Maintenance`;
+      else if (appState.taskGroupBy === 'MACHINE') gTitle = m ? `${m.assetCode} · ${m.name}` : 'Unknown Machine';
+      else if (appState.taskGroupBy === 'PIC') gTitle = t.personInCharge || 'Unassigned';
+      else {
+        const effGid = t.groupId || m?.groupId;
+        gTitle = effGid && gMap[effGid] ? gMap[effGid].name : 'Ungrouped';
+      }
+      if (!groupBucket.has(gTitle)) groupBucket.set(gTitle, []);
+      groupBucket.get(gTitle).push(t);
+    });
+    groupBucket.forEach((tasks, title) => sections.push({ title, tasks }));
+  }
+
+  const renderTaskRow = (t) => {
+    const m = mMap[t.machineId];
+    const g = gMap[t.groupId || m?.groupId];
+    const overdue = t.deadlineMillis < now;
+    return `<tr>
+      <td>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;">
+          ${priorityPillHtml(t.priority)}
+          <span class="pill pill-primary">${esc(t.cadence)}</span>
+        </div>
+        ${t.cadence!=='ONCE' ? `<div class="muted" style="margin-top:3px;">Auto-repeats</div>`:''}
+        ${g ? `<div class="muted" style="margin-top:4px;">${esc(g.name)}</div>` : ''}
+      </td>
+      <td><strong>${esc(m?.assetCode || '-')}</strong><div class="muted">${esc(m?.name || '')}</div></td>
+      <td><strong>${esc(t.title)}</strong><div class="muted">${esc(t.description)}</div></td>
+      <td><div class="muted">${fmtDate(t.createdAtMillis)}</div></td>
+      <td>
+        <span class="pill ${overdue ? 'pill-danger' : 'pill-ok'}">${overdue ? 'OVERDUE' : 'ON SCHEDULE'}</span>
+        <div class="muted">${fmtDate(t.deadlineMillis)}</div>
+        <div class="muted">${t.reminderEnabled ? `Remind ${esc(formatLeadTime(t.reminderLeadHours))} before` : 'Reminder off'}</div>
+      </td>
+      <td>
+        <strong>${esc(t.personInCharge)}</strong>
+        ${t.assistantEngineers ? `<div class="muted">+ ${esc(t.assistantEngineers)}</div>` : ''}
+      </td>
+      <td>${t.estimatedMinutes}m</td>
+      <td>
+        <div class="row">
+          <button class="btn-primary btn-sm" onclick="openCompleteTaskModal(${t.id})">Complete</button>
+          <button class="btn-sm btn-danger" onclick="openRejectTaskModal(${t.id})">Reject</button>
+          <button class="btn-sm" onclick="openTaskModal(${t.id})">Edit</button>
+          <button class="btn-sm btn-danger" onclick="deleteTask(${t.id})">Del</button>
+        </div>
+      </td>
+    </tr>`;
+  };
+
+  let tbodyHtml = '';
+  if (filtered.length === 0) {
+    tbodyHtml = `<tr><td colspan="8" class="muted">No active tasks match the current filter.</td></tr>`;
+  } else {
+    sections.forEach((sec, idx) => {
+      if (appState.taskGroupBy !== 'NONE') {
+        const collapsed = Boolean(appState.collapsedTaskGroups[sec.title]);
+        const secOverdue = sec.tasks.filter(t => t.deadlineMillis < now).length;
+        const encodedKey = encodeURIComponent(sec.title);
+        tbodyHtml += `<tr class="group-row" onclick="toggleTaskGroupCollapse('${encodedKey}')">
+          <td colspan="8">
+            <div class="between">
+              <span>${collapsed ? '▶' : '▼'} ${esc(sec.title)}</span>
+              <div class="row">
+                ${secOverdue > 0 ? `<span class="pill pill-danger">${secOverdue} OVERDUE</span>` : ''}
+                <span class="pill">${sec.tasks.length}</span>
+              </div>
+            </div>
+          </td>
+        </tr>`;
+        if (!collapsed) {
+          tbodyHtml += sec.tasks.map(renderTaskRow).join('');
+        }
+      } else {
+        tbodyHtml += sec.tasks.map(renderTaskRow).join('');
+      }
+    });
+  }
 
   root.innerHTML = `
     <div class="card">
       ${subtabsHtml}
       <div class="between" style="gap:8px;">
         <div class="row" style="flex:1; min-width:240px;">
-          <input style="max-width:260px;" placeholder="Search tasks, machine, PIC..." value="${esc(appState.taskSearch)}" oninput="appState.taskSearch=this.value; renderTab()" />
+          <input style="max-width:240px;" placeholder="Search tasks, machine, PIC..." value="${esc(appState.taskSearch)}" oninput="appState.taskSearch=this.value; renderTab()" />
+          <select style="width:auto;" onchange="appState.taskGroupBy=this.value; renderTab()">
+            <option value="CUSTOM_GROUP" ${appState.taskGroupBy==='CUSTOM_GROUP'?'selected':''}>Group: Custom Group</option>
+            <option value="CADENCE" ${appState.taskGroupBy==='CADENCE'?'selected':''}>Group: Cadence</option>
+            <option value="MACHINE" ${appState.taskGroupBy==='MACHINE'?'selected':''}>Group: Machine</option>
+            <option value="PIC" ${appState.taskGroupBy==='PIC'?'selected':''}>Group: Engineer</option>
+            <option value="NONE" ${appState.taskGroupBy==='NONE'?'selected':''}>Flat List</option>
+          </select>
           <select style="width:auto;" onchange="appState.taskPriority=this.value; renderTab()">
             <option value="ALL" ${appState.taskPriority==='ALL'?'selected':''}>All Priorities</option>
             <option value="URGENT" ${appState.taskPriority==='URGENT'?'selected':''}>URGENT</option>
@@ -563,9 +861,6 @@ function renderTasks(root, d) {
             <option value="ALL" ${appState.taskGroupId==='ALL'?'selected':''}>All Groups</option>
             ${d.groups.map(g => `<option value="${g.id}" ${String(appState.taskGroupId)===String(g.id)?'selected':''}>${esc(g.name)}</option>`).join('')}
           </select>
-          <button class="btn-sm" onclick="appState.taskSort = appState.taskSort==='ASC'?'DESC':'ASC'; renderTab()">
-            ${appState.taskSort === 'ASC' ? 'Date ↑ Soonest' : 'Date ↓ Latest'}
-          </button>
           <label style="display:inline-flex;align-items:center;gap:6px;margin:0;cursor:pointer;">
             <input type="checkbox" style="width:auto;" ${appState.taskOverdueOnly ? 'checked' : ''} onchange="appState.taskOverdueOnly=this.checked; renderTab()" />
             Overdue Only
@@ -580,60 +875,71 @@ function renderTasks(root, d) {
         ${['ALL','ONCE','DAILY','WEEKLY','MONTHLY','YEARLY'].map(c => `<button class="chip ${appState.taskCadence===c?'active':''}" onclick="appState.taskCadence='${c}'; renderTab()">${c}</button>`).join('')}
       </div>
       <table>
-        <thead><tr><th>Priority &amp; Cadence</th><th>Machine</th><th>Task</th><th>Deadline &amp; Reminder</th><th>Engineers</th><th>Est.</th><th>Actions</th></tr></thead>
-        <tbody>
-          ${filtered.length === 0 ? `<tr><td colspan="7" class="muted">No active tasks match the current filter.</td></tr>` :
-            filtered.map(t => {
-              const m = mMap[t.machineId];
-              const g = gMap[t.groupId || m?.groupId];
-              const overdue = t.deadlineMillis < now;
-              return `<tr>
-                <td>
-                  <div style="display:flex;gap:4px;flex-wrap:wrap;">
-                    ${priorityPillHtml(t.priority)}
-                    <span class="pill pill-primary">${esc(t.cadence)}</span>
-                  </div>
-                  ${t.cadence!=='ONCE' ? `<div class="muted" style="margin-top:3px;">Auto-repeats</div>`:''}
-                  ${g ? `<div class="muted" style="margin-top:4px;">${esc(g.name)}</div>` : ''}
-                </td>
-                <td><strong>${esc(m?.assetCode || '-')}</strong><div class="muted">${esc(m?.name || '')}</div></td>
-                <td><strong>${esc(t.title)}</strong><div class="muted">${esc(t.description)}</div></td>
-                <td>
-                  <span class="pill ${overdue ? 'pill-danger' : 'pill-ok'}">${overdue ? 'OVERDUE' : 'ON SCHEDULE'}</span>
-                  <div class="muted">${fmtDate(t.deadlineMillis)}</div>
-                  <div class="muted">${t.reminderEnabled ? `Remind ${esc(formatLeadTime(t.reminderLeadHours))} before` : 'Reminder off'}</div>
-                </td>
-                <td>
-                  <strong>${esc(t.personInCharge)}</strong>
-                  ${t.assistantEngineers ? `<div class="muted">+ ${esc(t.assistantEngineers)}</div>` : ''}
-                </td>
-                <td>${t.estimatedMinutes}m</td>
-                <td>
-                  <div class="row">
-                    <button class="btn-primary btn-sm" onclick="openCompleteTaskModal(${t.id})">Complete</button>
-                    <button class="btn-sm btn-danger" onclick="openRejectTaskModal(${t.id})">Reject</button>
-                    <button class="btn-sm" onclick="openTaskModal(${t.id})">Edit</button>
-                    <button class="btn-sm btn-danger" onclick="deleteTask(${t.id})">Del</button>
-                  </div>
-                </td>
-              </tr>`;
-            }).join('')}
-        </tbody>
+        <thead>
+          <tr>
+            ${sortableTh('tasks', 'priority', 'Priority & Cadence')}
+            ${sortableTh('tasks', 'machine', 'Machine')}
+            ${sortableTh('tasks', 'title', 'Task')}
+            ${sortableTh('tasks', 'created', 'Created')}
+            ${sortableTh('tasks', 'deadline', 'Deadline & Reminder')}
+            ${sortableTh('tasks', 'pic', 'Engineers')}
+            ${sortableTh('tasks', 'est', 'Est.')}
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>${tbodyHtml}</tbody>
       </table>
     </div>`;
 }
 
+function toggleTaskGroupCollapse(encodedTitle) {
+  const title = decodeURIComponent(encodedTitle);
+  appState.collapsedTaskGroups[title] = !appState.collapsedTaskGroups[title];
+  renderTab();
+}
+
 function renderTodoSubTabHtml(d) {
   const mMap = byIdMap(d.machines);
-  const completedCount = d.todos.filter(td => td.isCompleted).length;
-  const filtered = d.todos.filter(td => {
-    if (!appState.todoShowDone && td.isCompleted) return false;
-    if (appState.todoRepeat !== 'ALL' && td.repeatRule !== appState.todoRepeat) return false;
+  const gMap = byIdMap(d.groups);
+  const now = Date.now();
+  const completedCount = (d.todos || []).filter(td => td.isCompleted).length;
+  const feed = buildTodoFeedList(d);
+  const picNames = [...new Set((d.engineers || []).map(e => e.name).concat(feed.map(f => f.personInCharge)).filter(Boolean))].sort();
+  const q = appState.todoSearch.trim().toLowerCase();
+  const tdSort = appState.colSorts.todos || { key: 'trigger', dir: 'ASC' };
+
+  const filtered = feed.filter(item => {
+    if (!appState.todoShowDone && item.isCompleted) return false;
+    if (appState.todoRepeat !== 'ALL' && item.repeatLabel !== appState.todoRepeat) return false;
+    if (appState.todoPriority !== 'ALL' && item.priority !== appState.todoPriority) return false;
+    if (appState.todoGroupId !== 'ALL' && String(item.groupId || '') !== String(appState.todoGroupId)) return false;
+    if (appState.todoPic !== 'ALL') {
+      const picLower = appState.todoPic.toLowerCase();
+      const isPic = item.personInCharge.toLowerCase() === picLower;
+      const isAst = parseEngineerList(item.assistantEngineers).some(a => a.toLowerCase() === picLower);
+      if (!isPic && !isAst) return false;
+    }
+    if (q) {
+      const m = item.machineId ? mMap[item.machineId] : null;
+      const hay = `${item.title} ${item.notes} ${item.personInCharge} ${item.assistantEngineers} ${m?.assetCode || ''} ${m?.name || ''}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
     return true;
   }).sort((a, b) => {
     if (a.isCompleted !== b.isCompleted) return a.isCompleted ? 1 : -1;
-    if (!a.isCompleted) return a.dueAtMillis - b.dueAtMillis;
-    return (b.completedAtMillis || b.dueAtMillis) - (a.completedAtMillis || a.dueAtMillis);
+    switch (tdSort.key) {
+      case 'title': return cmpValues(a.title, b.title, tdSort.dir);
+      case 'repeat': return cmpValues(a.repeatLabel, b.repeatLabel, tdSort.dir);
+      case 'priority': return cmpValues(priorityRank(a.priority), priorityRank(b.priority), tdSort.dir);
+      case 'created': return cmpValues(a.createdAtMillis, b.createdAtMillis, tdSort.dir);
+      case 'pic': return cmpValues(a.personInCharge, b.personInCharge, tdSort.dir);
+      case 'trigger':
+      default: {
+        const tA = a.isCompleted ? (a.completedAtMillis || a.dueAtMillis) : a.triggerAtMillis;
+        const tB = b.isCompleted ? (b.completedAtMillis || b.dueAtMillis) : b.triggerAtMillis;
+        return cmpValues(tA, tB, tdSort.dir);
+      }
+    }
   });
 
   const pageSize = [25, 50, 100].includes(appState.todoPageSize) ? appState.todoPageSize : 25;
@@ -644,8 +950,23 @@ function renderTodoSubTabHtml(d) {
   const paged = filtered.slice(startIdx, startIdx + pageSize);
 
   return `
-    <div class="between">
-      <div class="row">
+    <div class="between" style="gap:8px;">
+      <div class="row" style="flex:1; min-width:240px;">
+        <input style="max-width:240px;" placeholder="Search reminders, tasks, machine, PIC..." value="${esc(appState.todoSearch)}" oninput="appState.todoSearch=this.value; appState.todoPage=0; renderTab()" />
+        <select style="width:auto;" onchange="appState.todoPriority=this.value; appState.todoPage=0; renderTab()">
+          <option value="ALL" ${appState.todoPriority==='ALL'?'selected':''}>All Priorities</option>
+          <option value="URGENT" ${appState.todoPriority==='URGENT'?'selected':''}>URGENT</option>
+          <option value="HIGH" ${appState.todoPriority==='HIGH'?'selected':''}>HIGH</option>
+          <option value="NORMAL" ${appState.todoPriority==='NORMAL'?'selected':''}>NORMAL</option>
+        </select>
+        <select style="width:auto;" onchange="appState.todoPic=this.value; appState.todoPage=0; renderTab()">
+          <option value="ALL" ${appState.todoPic==='ALL'?'selected':''}>All Engineers</option>
+          ${picNames.map(p => `<option value="${esc(p)}" ${appState.todoPic===p?'selected':''}>${esc(p)}</option>`).join('')}
+        </select>
+        <select style="width:auto;" onchange="appState.todoGroupId=this.value; appState.todoPage=0; renderTab()">
+          <option value="ALL" ${appState.todoGroupId==='ALL'?'selected':''}>All Groups</option>
+          ${d.groups.map(g => `<option value="${g.id}" ${String(appState.todoGroupId)===String(g.id)?'selected':''}>${esc(g.name)}</option>`).join('')}
+        </select>
         <label style="display:inline-flex;align-items:center;gap:6px;margin:0;cursor:pointer;">
           <input type="checkbox" style="width:auto;" ${appState.todoShowDone?'checked':''} onchange="appState.todoShowDone=this.checked; appState.todoPage=0; renderTab()" /> Show Completed (${completedCount})
         </label>
@@ -662,18 +983,69 @@ function renderTodoSubTabHtml(d) {
       ${['ALL','ONCE','DAILY','WEEKLY','MONTHLY','YEARLY'].map(r => `<button class="chip ${appState.todoRepeat===r?'active':''}" onclick="appState.todoRepeat='${r}'; appState.todoPage=0; renderTab()">${r}</button>`).join('')}
     </div>
     <table>
-      <thead><tr><th>Done</th><th>Title</th><th>Repeat</th><th>Priority</th><th>Trigger / Completed</th><th>PIC</th><th>Actions</th></tr></thead>
+      <thead>
+        <tr>
+          <th>Done</th>
+          ${sortableTh('todos', 'title', 'Title & Source')}
+          ${sortableTh('todos', 'repeat', 'Repeat')}
+          ${sortableTh('todos', 'priority', 'Priority')}
+          ${sortableTh('todos', 'created', 'Created')}
+          ${sortableTh('todos', 'trigger', 'Remind / Deadline')}
+          ${sortableTh('todos', 'pic', 'PIC')}
+          <th>Actions</th>
+        </tr>
+      </thead>
       <tbody>
-        ${paged.length === 0 ? `<tr><td colspan="7" class="muted">No reminders found.</td></tr>` :
-          paged.map(td => `<tr>
-            <td><input type="checkbox" style="width:auto;" ${td.isCompleted?'checked':''} onchange="toggleTodo(${td.id})" /></td>
-            <td><strong>${esc(td.title)}</strong><div class="muted">${esc(td.notes)} ${td.machineId && mMap[td.machineId] ? '· ' + esc(mMap[td.machineId].assetCode) : ''}</div></td>
-            <td><span class="pill pill-primary">${esc(td.repeatRule)}</span></td>
-            <td>${priorityPillHtml(td.priority)}</td>
-            <td>${td.isCompleted && td.completedAtMillis ? `<span class="pill pill-ok">Done ${fmtDate(td.completedAtMillis)}</span>` : fmtDate(td.dueAtMillis)}</td>
-            <td>${esc(td.personInCharge)}</td>
-            <td><div class="row"><button class="btn-sm" onclick="openTodoModal(${td.id})">Edit</button><button class="btn-sm btn-danger" onclick="deleteTodo(${td.id})">Del</button></div></td>
-          </tr>`).join('')}
+        ${paged.length === 0 ? `<tr><td colspan="8" class="muted">No reminders or task reminders match the filter.</td></tr>` :
+          paged.map(item => {
+            const m = item.machineId ? mMap[item.machineId] : null;
+            const g = item.groupId ? gMap[item.groupId] : null;
+            const isOverdue = !item.isCompleted && item.dueAtMillis < now;
+            if (item.kind === 'TASK') {
+              const t = item.raw;
+              return `<tr>
+                <td><span class="pill pill-primary">TASK</span></td>
+                <td>
+                  <strong>${esc(item.title)}</strong>
+                  <div class="muted">${m ? esc(m.assetCode) + ' · ' + esc(m.name) : ''}${g ? ' · ' + esc(g.name) : ''}${item.notes ? ' — ' + esc(item.notes) : ''}</div>
+                </td>
+                <td><span class="pill pill-primary">${esc(item.repeatLabel)}</span></td>
+                <td>${priorityPillHtml(item.priority)}</td>
+                <td><div class="muted">${fmtDate(item.createdAtMillis)}</div></td>
+                <td>
+                  <span class="pill ${isOverdue ? 'pill-danger' : 'pill-warn'}">${isOverdue ? 'OVERDUE' : 'REMIND AT'}</span>
+                  <div>${fmtDate(item.triggerAtMillis)}</div>
+                  <div class="muted">Deadline: ${fmtDate(item.dueAtMillis)}</div>
+                </td>
+                <td><strong>${esc(item.personInCharge)}</strong>${item.assistantEngineers ? `<div class="muted">+ ${esc(item.assistantEngineers)}</div>` : ''}</td>
+                <td>
+                  <div class="row">
+                    <button class="btn-primary btn-sm" onclick="openCompleteTaskModal(${t.id})">Complete</button>
+                    <button class="btn-sm btn-danger" onclick="openRejectTaskModal(${t.id})">Reject</button>
+                    <button class="btn-sm" onclick="openTaskModal(${t.id})">Edit</button>
+                  </div>
+                </td>
+              </tr>`;
+            }
+            const td = item.raw;
+            return `<tr>
+              <td><input type="checkbox" style="width:auto;" ${td.isCompleted?'checked':''} onchange="toggleTodo(${td.id})" /></td>
+              <td>
+                <strong>${esc(td.title)}</strong>
+                <div class="muted">${esc(td.notes)}${m ? ' · ' + esc(m.assetCode) : ''}${g ? ' · ' + esc(g.name) : ''}</div>
+              </td>
+              <td><span class="pill pill-primary">${esc(td.repeatRule)}</span></td>
+              <td>${priorityPillHtml(td.priority)}</td>
+              <td><div class="muted">${fmtDate(item.createdAtMillis)}</div></td>
+              <td>
+                ${td.isCompleted && td.completedAtMillis
+                  ? `<span class="pill pill-ok">Done ${fmtDate(td.completedAtMillis)}</span>`
+                  : `${isOverdue ? `<span class="pill pill-danger">OVERDUE</span> ` : ''}${fmtDate(td.dueAtMillis)}`}
+              </td>
+              <td>${esc(td.personInCharge)}</td>
+              <td><div class="row"><button class="btn-sm" onclick="openTodoModal(${td.id})">Edit</button><button class="btn-sm btn-danger" onclick="deleteTodo(${td.id})">Del</button></div></td>
+            </tr>`;
+          }).join('')}
       </tbody>
     </table>
     ${filtered.length > 0 ? `
@@ -689,37 +1061,99 @@ function renderTodoSubTabHtml(d) {
 
 function renderHistorySubTabHtml(d) {
   const mMap = byIdMap(d.machines);
+  const gMap = byIdMap(d.groups);
+  const picNames = [...new Set((d.engineers || []).map(e => e.name).concat(d.serviceLogs.map(l => l.personInCharge)).filter(Boolean))].sort();
   const q = appState.historySearch.trim().toLowerCase();
+  const hSort = appState.colSorts.history || { key: 'recorded', dir: 'DESC' };
+
   const filtered = d.serviceLogs.filter(l => {
+    const m = mMap[l.machineId];
+    const effGroupId = l.groupId || m?.groupId || null;
     if (appState.historyOutcome !== 'ALL' && l.outcome !== appState.historyOutcome) return false;
+    if (appState.historyPriority !== 'ALL' && (l.prioritySnapshot || '') !== appState.historyPriority) return false;
+    if (appState.historyCadence !== 'ALL' && (l.cadenceSnapshot || '') !== appState.historyCadence) return false;
+    if (appState.historyGroupId !== 'ALL' && String(effGroupId || '') !== String(appState.historyGroupId)) return false;
+    if (appState.historyPic !== 'ALL') {
+      const picLower = appState.historyPic.toLowerCase();
+      const isPic = (l.personInCharge || '').toLowerCase() === picLower;
+      const isAst = parseEngineerList(l.assistantEngineers).some(a => a.toLowerCase() === picLower);
+      if (!isPic && !isAst) return false;
+    }
     if (q) {
-      const m = mMap[l.machineId];
       const partsHay = (l.parts || []).map(p => `${p.partCode} ${p.partName} ${p.partDescription}`).join(' ');
       const hay = `${l.summaryTitle} ${l.malfunctionDetails} ${l.rejectionReason} ${l.personInCharge} ${l.assistantEngineers || ''} ${m?.assetCode || ''} ${m?.name || ''} ${partsHay}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
+  }).sort((a, b) => {
+    const mA = mMap[a.machineId];
+    const mB = mMap[b.machineId];
+    switch (hSort.key) {
+      case 'outcome': return cmpValues(a.outcome, b.outcome, hSort.dir);
+      case 'priority': return cmpValues(priorityRank(a.prioritySnapshot), priorityRank(b.prioritySnapshot), hSort.dir);
+      case 'machine': return cmpValues(`${mA?.assetCode || ''} ${mA?.name || ''}`, `${mB?.assetCode || ''} ${mB?.name || ''}`, hSort.dir);
+      case 'title': return cmpValues(a.summaryTitle, b.summaryTitle, hSort.dir);
+      case 'pic': return cmpValues(a.personInCharge, b.personInCharge, hSort.dir);
+      case 'created': return cmpValues(a.createdAtMillis || 0, b.createdAtMillis || 0, hSort.dir);
+      case 'recorded':
+      default:
+        return cmpValues(a.completedAtMillis || 0, b.completedAtMillis || 0, hSort.dir);
+    }
   });
 
   return `
-    <div class="between">
-      <input style="max-width:360px;" placeholder="Search completed or rejected tasks..." value="${esc(appState.historySearch)}" oninput="appState.historySearch=this.value; renderTab()" />
-      <span class="muted">Generated automatically when tasks are marked Done or Rejected</span>
+    <div class="between" style="gap:8px;">
+      <div class="row" style="flex:1; min-width:240px;">
+        <input style="max-width:260px;" placeholder="Search completed/rejected task, engineer, part..." value="${esc(appState.historySearch)}" oninput="appState.historySearch=this.value; renderTab()" />
+        <select style="width:auto;" onchange="appState.historyPriority=this.value; renderTab()">
+          <option value="ALL" ${appState.historyPriority==='ALL'?'selected':''}>All Priorities</option>
+          <option value="URGENT" ${appState.historyPriority==='URGENT'?'selected':''}>URGENT</option>
+          <option value="HIGH" ${appState.historyPriority==='HIGH'?'selected':''}>HIGH</option>
+          <option value="NORMAL" ${appState.historyPriority==='NORMAL'?'selected':''}>NORMAL</option>
+        </select>
+        <select style="width:auto;" onchange="appState.historyCadence=this.value; renderTab()">
+          <option value="ALL" ${appState.historyCadence==='ALL'?'selected':''}>All Cadences</option>
+          ${['ONCE','DAILY','WEEKLY','MONTHLY','YEARLY'].map(c => `<option value="${c}" ${appState.historyCadence===c?'selected':''}>${c}</option>`).join('')}
+        </select>
+        <select style="width:auto;" onchange="appState.historyPic=this.value; renderTab()">
+          <option value="ALL" ${appState.historyPic==='ALL'?'selected':''}>All Engineers</option>
+          ${picNames.map(p => `<option value="${esc(p)}" ${appState.historyPic===p?'selected':''}>${esc(p)}</option>`).join('')}
+        </select>
+        <select style="width:auto;" onchange="appState.historyGroupId=this.value; renderTab()">
+          <option value="ALL" ${appState.historyGroupId==='ALL'?'selected':''}>All Groups</option>
+          ${d.groups.map(g => `<option value="${g.id}" ${String(appState.historyGroupId)===String(g.id)?'selected':''}>${esc(g.name)}</option>`).join('')}
+        </select>
+      </div>
+      <span class="muted">Auto-generated on Done or Rejected</span>
     </div>
     <div class="chip-row">
       ${['ALL','DONE','REJECTED'].map(o => `<button class="chip ${appState.historyOutcome===o?'active':''}" onclick="appState.historyOutcome='${o}'; renderTab()">${o === 'ALL' ? 'All Outcomes' : o}</button>`).join('')}
     </div>
     <table>
-      <thead><tr><th>Outcome</th><th>Machine</th><th>Task &amp; Details / Parts</th><th>Engineers</th><th>Recorded</th><th>Actions</th></tr></thead>
+      <thead>
+        <tr>
+          ${sortableTh('history', 'outcome', 'Outcome & Cadence')}
+          ${sortableTh('history', 'priority', 'Priority')}
+          ${sortableTh('history', 'machine', 'Machine')}
+          ${sortableTh('history', 'title', 'Task & Details / Parts')}
+          ${sortableTh('history', 'pic', 'Engineers')}
+          ${sortableTh('history', 'created', 'Created')}
+          ${sortableTh('history', 'recorded', 'Recorded')}
+          <th>Actions</th>
+        </tr>
+      </thead>
       <tbody>
-        ${filtered.length === 0 ? `<tr><td colspan="6" class="muted">No historical records match the filter.</td></tr>` :
+        ${filtered.length === 0 ? `<tr><td colspan="8" class="muted">No historical records match the filter.</td></tr>` :
           filtered.map(l => {
             const m = mMap[l.machineId];
+            const g = gMap[l.groupId || m?.groupId];
             return `<tr>
               <td>
                 ${outcomePillHtml(l.outcome)}
                 ${l.cadenceSnapshot ? `<div style="margin-top:4px;"><span class="pill pill-primary">${esc(l.cadenceSnapshot)}</span></div>` : ''}
+                ${g ? `<div class="muted" style="margin-top:3px;">${esc(g.name)}</div>` : ''}
               </td>
+              <td>${l.prioritySnapshot ? priorityPillHtml(l.prioritySnapshot) : '<span class="muted">-</span>'}</td>
               <td><strong>${esc(m?.assetCode || '-')}</strong><div class="muted">${esc(m?.name || '')}</div></td>
               <td>
                 <strong>${esc(l.summaryTitle)}</strong>
@@ -731,6 +1165,7 @@ function renderHistorySubTabHtml(d) {
                 <strong>${esc(l.personInCharge)}</strong>
                 ${l.assistantEngineers ? `<div class="muted">+ ${esc(l.assistantEngineers)}</div>` : ''}
               </td>
+              <td><div class="muted">${fmtDate(l.createdAtMillis)}</div></td>
               <td><div>${fmtDate(l.completedAtMillis)}</div><div class="muted">${l.serviceDurationMinutes > 0 ? l.serviceDurationMinutes + 'm' : 'Rejected'}</div></td>
               <td><button class="btn-sm btn-danger" onclick="deleteHistoryLog(${l.id})">Del</button></td>
             </tr>`;
@@ -745,11 +1180,20 @@ async function deleteHistoryLog(id) {
   showToast('History entry deleted'); refreshState();
 }
 
+function syncTaskMachineStatus() {
+  const mId = Number(document.getElementById('t-machine')?.value);
+  const m = (appState.data?.machines || []).find(x => x.id === mId);
+  const stEl = document.getElementById('t-machine-status');
+  if (m && stEl) stEl.value = m.status || 'OPERATIONAL';
+}
+
 function openTaskModal(id = null, defaultMachineIdArg = null) {
   const d = appState.data;
   const t = id ? d.tasks.find(x => x.id === id) : null;
   const engineers = d.engineers || [];
   const defaultMachineId = t ? t.machineId : (defaultMachineIdArg || d.machines[0]?.id || 0);
+  const defaultMachine = d.machines.find(x => x.id === defaultMachineId);
+  const currentMachineStatus = defaultMachine?.status || 'OPERATIONAL';
   const selectedCadence = t?.cadence || 'ONCE';
   const selectedPriority = t?.priority || 'NORMAL';
   const rawLead = t?.reminderLeadHours ?? 24;
@@ -760,8 +1204,19 @@ function openTaskModal(id = null, defaultMachineIdArg = null) {
   const selectedAst = parseEngineerList(t?.assistantEngineers || '');
 
   openModal(t ? 'Edit Maintenance Task' : 'New Maintenance Task', `
+    ${t ? `<div class="muted">Created: ${fmtDate(t.createdAtMillis)}</div>` : ''}
     ${engineers.length === 0 ? `<div class="pill pill-danger" style="padding:8px 10px;">No registered engineers found. Add an engineer in the Engineers tab before saving.</div>` : ''}
-    <div><label>Machine *</label><select id="t-machine">${d.machines.map(m => `<option value="${m.id}" ${m.id===defaultMachineId?'selected':''}>${esc(m.assetCode)} · ${esc(m.name)}</option>`).join('')}</select></div>
+    <div class="grid-2">
+      <div><label>Machine *</label><select id="t-machine" onchange="syncTaskMachineStatus()">${d.machines.map(m => `<option value="${m.id}" ${m.id===defaultMachineId?'selected':''}>${esc(m.assetCode)} · ${esc(m.name)}</option>`).join('')}</select></div>
+      <div>
+        <label>Machine Current Condition / Status</label>
+        <select id="t-machine-status">
+          <option value="OPERATIONAL" ${currentMachineStatus==='OPERATIONAL'?'selected':''}>Operational</option>
+          <option value="MAINTENANCE_DUE" ${currentMachineStatus==='MAINTENANCE_DUE'?'selected':''}>Maintenance Due</option>
+          <option value="MALFUNCTION" ${currentMachineStatus==='MALFUNCTION'?'selected':''}>Malfunction</option>
+        </select>
+      </div>
+    </div>
     <div><label>Custom Group</label><select id="t-group"><option value="">Use Machine's Group</option>${d.groups.map(g => `<option value="${g.id}" ${t?.groupId===g.id?'selected':''}>${esc(g.name)}</option>`).join('')}</select></div>
     <div><label>Task Title *</label><input id="t-title" value="${esc(t?.title || '')}" /></div>
     <div><label>Checklist / Description</label><textarea id="t-desc" rows="2">${esc(t?.description || '')}</textarea></div>
@@ -815,6 +1270,7 @@ async function saveTask(id) {
   await apiJson('/api/tasks', 'POST', {
     id,
     machineId: Number(document.getElementById('t-machine').value),
+    machineStatus: document.getElementById('t-machine-status').value,
     groupId: document.getElementById('t-group').value ? Number(document.getElementById('t-group').value) : null,
     title,
     description: document.getElementById('t-desc').value,
@@ -944,12 +1400,6 @@ function openCompleteTaskModal(taskId) {
       <div id="ct-assistants-box" class="checkbox-grid">${renderAssistantCheckboxesHtml('ct', engineers, activePic, selectedAst)}</div>
     </div>
     <div><label>Findings / Work Performed</label><textarea id="ct-notes" rows="2"></textarea></div>
-    <div class="row">
-      <label style="display:inline-flex;align-items:center;gap:6px;margin:0;cursor:pointer;">
-        <input id="ct-malf" type="checkbox" style="width:auto;" /> Malfunction discovered
-      </label>
-      <select id="ct-sev" style="width:auto;"><option>LOW</option><option selected>MEDIUM</option><option>HIGH</option><option>CRITICAL</option></select>
-    </div>
     <div id="draft-parts-wrap">${renderDraftPartsBlock()}</div>
   `, `<button class="btn-primary" onclick="submitCompleteTask(${taskId})">Complete &amp; Save Report</button>`);
   renderPickerResults();
@@ -963,8 +1413,8 @@ async function submitCompleteTask(taskId) {
     assistantEngineers: getCheckedAssistants('ct'),
     actualDurationMinutes: Number(document.getElementById('ct-min').value) || 30,
     notes: document.getElementById('ct-notes').value,
-    flagMalfunction: document.getElementById('ct-malf').checked,
-    severity: document.getElementById('ct-sev').value,
+    flagMalfunction: false,
+    severity: 'LOW',
     spareParts: appState.draftParts
   });
   closeModal(); showToast('Task completed & report generated'); refreshState();
@@ -1191,17 +1641,26 @@ async function deleteMachine(id) { if (confirm('Delete machine and all its tasks
 // --- 3. WAREHOUSE SPARE PARTS ---
 function renderWarehouse(root, d) {
   const tokens = appState.partSearch.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const wSort = appState.colSorts.warehouse || { key: 'partCode', dir: 'ASC' };
   const filtered = d.warehouseParts.filter(w => {
     if (!tokens.length) return true;
     const hay = `${w.partCode} ${w.partName} ${w.partDescription}`.toLowerCase();
     return tokens.every(t => hay.includes(t));
+  }).sort((a, b) => {
+    switch (wSort.key) {
+      case 'partName': return cmpValues(a.partName || '', b.partName || '', wSort.dir);
+      case 'partDescription': return cmpValues(a.partDescription || '', b.partDescription || '', wSort.dir);
+      case 'defaultUnit': return cmpValues(a.defaultUnit || '', b.defaultUnit || '', wSort.dir);
+      case 'partCode':
+      default: return cmpValues(a.partCode || '', b.partCode || '', wSort.dir);
+    }
   });
   root.innerHTML = `
     <div class="card">
       <div class="between" style="margin-bottom:10px;">
         <div>
           <strong>Warehouse Spare Parts Catalog (${filtered.length} / ${d.warehouseParts.length})</strong>
-          <div class="muted">Codes &amp; descriptions master list (no stock quantity tracking)</div>
+          <div class="muted">Codes &amp; descriptions master list (with machine usage history)</div>
         </div>
         <div class="row">
           <button onclick="triggerQuickExcelImport()">Import Excel (.xlsx)</button>
@@ -1210,7 +1669,15 @@ function renderWarehouse(root, d) {
       </div>
       <input style="margin-bottom:10px;" placeholder="Search by Part Code / ID or Description..." value="${esc(appState.partSearch)}" oninput="appState.partSearch=this.value; renderTab()" />
       <table>
-        <thead><tr><th>Part ID / Code</th><th>Part Name</th><th>Description</th><th>Default Unit</th><th>Actions</th></tr></thead>
+        <thead>
+          <tr>
+            ${sortableTh('warehouse', 'partCode', 'Part ID / Code')}
+            ${sortableTh('warehouse', 'partName', 'Part Name')}
+            ${sortableTh('warehouse', 'partDescription', 'Description')}
+            ${sortableTh('warehouse', 'defaultUnit', 'Default Unit')}
+            <th>Actions</th>
+          </tr>
+        </thead>
         <tbody>
           ${filtered.length === 0 ? `<tr><td colspan="5" class="muted">No matching spare parts.</td></tr>` :
             filtered.map(w => `<tr>
@@ -1218,11 +1685,58 @@ function renderWarehouse(root, d) {
               <td><strong>${esc(w.partName || '-')}</strong></td>
               <td>${esc(w.partDescription)}</td>
               <td><span class="pill">${esc(w.defaultUnit)}</span></td>
-              <td><div class="row"><button class="btn-sm" onclick="openWarehouseModal(${w.id})">Edit</button><button class="btn-sm btn-danger" onclick="deleteWarehousePart(${w.id})">Del</button></div></td>
+              <td>
+                <div class="row">
+                  <button class="btn-sm" onclick="openPartHistoryModal(${w.id})">History</button>
+                  <button class="btn-sm" onclick="openWarehouseModal(${w.id})">Edit</button>
+                  <button class="btn-sm btn-danger" onclick="deleteWarehousePart(${w.id})">Del</button>
+                </div>
+              </td>
             </tr>`).join('')}
         </tbody>
       </table>
     </div>`;
+}
+
+function openPartHistoryModal(partId) {
+  const d = appState.data;
+  const part = (d.warehouseParts || []).find(w => w.id === partId);
+  if (!part) return;
+  const mMap = byIdMap(d.machines);
+  const code = String(part.partCode || '').trim().toLowerCase();
+  const name = String(part.partName || '').trim().toLowerCase();
+  const usages = [];
+  (d.serviceLogs || []).forEach(l => {
+    (l.parts || []).forEach(p => {
+      const pCode = String(p.partCode || '').trim().toLowerCase();
+      const pName = String(p.partName || '').trim().toLowerCase();
+      if ((code && pCode === code) || (name && pName === name)) {
+        usages.push({ log: l, part: p, machine: mMap[l.machineId] });
+      }
+    });
+  });
+  usages.sort((a, b) => (b.log.completedAtMillis || 0) - (a.log.completedAtMillis || 0));
+
+  const bodyHtml = usages.length === 0
+    ? `<div class="muted">This spare part has not been recorded on any machine maintenance history yet.</div>`
+    : `<table>
+        <thead><tr><th>Outcome</th><th>Machine</th><th>Task</th><th>Qty</th><th>Engineers</th><th>Date Used</th></tr></thead>
+        <tbody>
+          ${usages.map(u => `<tr>
+            <td>${outcomePillHtml(u.log.outcome)}</td>
+            <td><strong>${esc(u.machine?.assetCode || '-')}</strong><div class="muted">${esc(u.machine?.name || 'Unknown')}</div></td>
+            <td><strong>${esc(u.log.summaryTitle)}</strong></td>
+            <td><span class="pill pill-primary">×${u.part.quantity} ${esc(u.part.unit)}</span></td>
+            <td>${esc(u.log.personInCharge)}${u.log.assistantEngineers ? `<div class="muted">+ ${esc(u.log.assistantEngineers)}</div>` : ''}</td>
+            <td><div>${fmtDate(u.log.completedAtMillis)}</div><div class="muted">Created: ${fmtDate(u.log.createdAtMillis)}</div></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`;
+
+  openModal(`${part.partCode} — Usage History (${usages.length})`, `
+    <div class="muted">${esc(part.partName || part.partDescription)}</div>
+    ${bodyHtml}
+  `, '');
 }
 
 function openWarehouseModal(id = null) {
@@ -1254,39 +1768,61 @@ async function deleteWarehousePart(id) { if (confirm('Remove this spare part fro
 function renderEngineers(root, d) {
   const engineers = d.engineers || [];
   const q = appState.engineerSearch.trim().toLowerCase();
-  const filtered = engineers.filter(e => {
+  const eSort = appState.colSorts.engineers || { key: 'name', dir: 'ASC' };
+
+  const enriched = engineers.filter(e => {
     if (!q) return true;
     return `${e.name} ${e.employeeCode} ${e.role} ${e.shift}`.toLowerCase().includes(q);
+  }).map(e => {
+    const lower = e.name.toLowerCase();
+    const activeCount = d.tasks.filter(t => t.personInCharge.toLowerCase() === lower || parseEngineerList(t.assistantEngineers).some(a => a.toLowerCase() === lower)).length;
+    const histCount = d.serviceLogs.filter(l => l.personInCharge.toLowerCase() === lower || parseEngineerList(l.assistantEngineers).some(a => a.toLowerCase() === lower)).length;
+    return { e, activeCount, histCount };
+  }).sort((a, b) => {
+    switch (eSort.key) {
+      case 'employeeCode': return cmpValues(a.e.employeeCode || '', b.e.employeeCode || '', eSort.dir);
+      case 'role': return cmpValues(a.e.role || '', b.e.role || '', eSort.dir);
+      case 'shift': return cmpValues(a.e.shift || '', b.e.shift || '', eSort.dir);
+      case 'activeCount': return cmpValues(a.activeCount, b.activeCount, eSort.dir);
+      case 'histCount': return cmpValues(a.histCount, b.histCount, eSort.dir);
+      case 'name':
+      default: return cmpValues(a.e.name || '', b.e.name || '', eSort.dir);
+    }
   });
 
   root.innerHTML = `
     <div class="card">
       <div class="between" style="margin-bottom:10px;">
         <div>
-          <strong>Registered Maintenance Engineers (${filtered.length})</strong>
+          <strong>Registered Maintenance Engineers (${enriched.length})</strong>
           <div class="muted">Only engineers listed here can be assigned as PIC or Assistants</div>
         </div>
         <button class="btn-primary" onclick="openEngineerModal()">+ Add Engineer</button>
       </div>
       <input style="margin-bottom:10px;" placeholder="Search by name, employee ID, role, shift..." value="${esc(appState.engineerSearch)}" oninput="appState.engineerSearch=this.value; renderTab()" />
       <table>
-        <thead><tr><th>Engineer</th><th>Employee ID</th><th>Role</th><th>Shift</th><th>Active Tasks</th><th>History</th><th>Actions</th></tr></thead>
+        <thead>
+          <tr>
+            ${sortableTh('engineers', 'name', 'Engineer')}
+            ${sortableTh('engineers', 'employeeCode', 'Employee ID')}
+            ${sortableTh('engineers', 'role', 'Role')}
+            ${sortableTh('engineers', 'shift', 'Shift')}
+            ${sortableTh('engineers', 'activeCount', 'Active Tasks')}
+            ${sortableTh('engineers', 'histCount', 'History')}
+            <th>Actions</th>
+          </tr>
+        </thead>
         <tbody>
-          ${filtered.length === 0 ? `<tr><td colspan="7" class="muted">No engineers match the search.</td></tr>` :
-            filtered.map(e => {
-              const lower = e.name.toLowerCase();
-              const activeCount = d.tasks.filter(t => t.personInCharge.toLowerCase() === lower || parseEngineerList(t.assistantEngineers).some(a => a.toLowerCase() === lower)).length;
-              const histCount = d.serviceLogs.filter(l => l.personInCharge.toLowerCase() === lower || parseEngineerList(l.assistantEngineers).some(a => a.toLowerCase() === lower)).length;
-              return `<tr>
-                <td><strong>${esc(e.name)}</strong></td>
-                <td>${e.employeeCode ? `<span class="pill pill-primary">${esc(e.employeeCode)}</span>` : '-'}</td>
-                <td>${esc(e.role)}</td>
-                <td><span class="pill">${esc(e.shift)}</span></td>
-                <td><button class="btn-sm" onclick="openEngineerTasksModal(${e.id})">${activeCount} Active &rarr;</button></td>
-                <td>${histCount}</td>
-                <td><div class="row"><button class="btn-sm" onclick="openEngineerModal(${e.id})">Edit</button><button class="btn-sm btn-danger" onclick="deleteEngineer(${e.id})">Del</button></div></td>
-              </tr>`;
-            }).join('')}
+          ${enriched.length === 0 ? `<tr><td colspan="7" class="muted">No engineers match the search.</td></tr>` :
+            enriched.map(({ e, activeCount, histCount }) => `<tr>
+              <td><strong>${esc(e.name)}</strong></td>
+              <td>${e.employeeCode ? `<span class="pill pill-primary">${esc(e.employeeCode)}</span>` : '-'}</td>
+              <td>${esc(e.role)}</td>
+              <td><span class="pill">${esc(e.shift)}</span></td>
+              <td><button class="btn-sm" onclick="openEngineerTasksModal(${e.id})">${activeCount} Active &rarr;</button></td>
+              <td><button class="btn-sm" onclick="openEngineerHistoryModal(${e.id})">${histCount} Logged &rarr;</button></td>
+              <td><div class="row"><button class="btn-sm" onclick="openEngineerModal(${e.id})">Edit</button><button class="btn-sm btn-danger" onclick="deleteEngineer(${e.id})">Del</button></div></td>
+            </tr>`).join('')}
         </tbody>
       </table>
     </div>`;
@@ -1319,7 +1855,7 @@ function openEngineerTasksModal(engineerId) {
               <span class="muted">${fmtDate(t.deadlineMillis)}</span>
             </div>
             <div style="font-weight:700;margin-top:5px;">${esc(t.title)}</div>
-            <div class="muted">${esc(m?.assetCode || '-')} · ${esc(m?.name || '')}</div>
+            <div class="muted">${esc(m?.assetCode || '-')} · ${esc(m?.name || '')} · Created: ${fmtDate(t.createdAtMillis)}</div>
             <div class="row" style="margin-top:8px;justify-content:flex-end;">
               <button class="btn-sm" onclick="closeModal(); openTaskModal(${t.id})">Edit</button>
               <button class="btn-sm btn-danger" onclick="closeModal(); openRejectTaskModal(${t.id})">Reject</button>
@@ -1337,12 +1873,65 @@ function openEngineerTasksModal(engineerId) {
   );
 }
 
+function openEngineerHistoryModal(engineerId) {
+  const d = appState.data;
+  const eng = (d.engineers || []).find(e => e.id === engineerId);
+  if (!eng) return;
+  const mMap = byIdMap(d.machines);
+  const lower = eng.name.toLowerCase();
+  const logs = d.serviceLogs.filter(l =>
+    l.personInCharge.toLowerCase() === lower ||
+    parseEngineerList(l.assistantEngineers).some(a => a.toLowerCase() === lower)
+  ).sort((a, b) => (b.completedAtMillis || 0) - (a.completedAtMillis || 0));
+
+  const listHtml = logs.length === 0
+    ? `<div class="muted">No historical tasks recorded yet for ${esc(eng.name)}.</div>`
+    : logs.map(l => {
+        const m = mMap[l.machineId];
+        const isPic = l.personInCharge.toLowerCase() === lower;
+        return `
+          <div style="border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--surface-alt);">
+            <div class="between">
+              <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;">
+                ${outcomePillHtml(l.outcome)}
+                ${l.prioritySnapshot ? priorityPillHtml(l.prioritySnapshot) : ''}
+                ${l.cadenceSnapshot ? `<span class="pill pill-primary">${esc(l.cadenceSnapshot)}</span>` : ''}
+                <span class="pill">${isPic ? 'PIC' : 'Assistant'}</span>
+              </div>
+              <span class="muted">${fmtDate(l.completedAtMillis)}</span>
+            </div>
+            <div style="font-weight:700;margin-top:5px;">${esc(l.summaryTitle)}</div>
+            <div class="muted">${esc(m?.assetCode || '-')} · ${esc(m?.name || '')} · Created: ${fmtDate(l.createdAtMillis)}</div>
+            ${l.outcome === 'REJECTED' && l.rejectionReason ? `<div style="color:var(--danger);font-size:12px;margin-top:4px;">Rejection reason: ${esc(l.rejectionReason)}</div>` : ''}
+            ${l.malfunctionDetails ? `<div class="muted" style="margin-top:4px;">${esc(l.malfunctionDetails)}</div>` : ''}
+            ${(l.parts || []).length ? `<div style="margin-top:5px;">${l.parts.map(p => `<span class="pill pill-primary" style="margin-right:4px;">${esc(p.partCode)} ${esc(p.partName)} ×${p.quantity} ${esc(p.unit)}</span>`).join('')}</div>` : ''}
+          </div>`;
+      }).join('');
+
+  openModal(
+    `${eng.name} — History (${logs.length})`,
+    `<div class="muted">${esc(eng.role)} · ${esc(eng.shift)}</div>${listHtml}`,
+    logs.length > 0
+      ? `<button class="btn-primary" onclick="filterHistoryByEngineer(${eng.id})">Filter in History Tab</button>`
+      : ''
+  );
+}
+
 function filterTasksByEngineer(engineerId) {
   const eng = (appState.data.engineers || []).find(e => e.id === engineerId);
   if (!eng) return;
   closeModal();
   appState.taskPic = eng.name;
   appState.taskSubTab = 'active';
+  switchTab('tasks');
+}
+
+function filterHistoryByEngineer(engineerId) {
+  const eng = (appState.data.engineers || []).find(e => e.id === engineerId);
+  if (!eng) return;
+  closeModal();
+  appState.historyPic = eng.name;
+  appState.taskSubTab = 'history';
   switchTab('tasks');
 }
 

@@ -85,7 +85,8 @@ data class WebTaskDto(
     val priority: String = "NORMAL",
     val reminderEnabled: Boolean,
     val reminderLeadHours: Int,
-    val lastCompletedMillis: Long?
+    val lastCompletedMillis: Long?,
+    val createdAtMillis: Long = 0L
 )
 
 @JsonClass(generateAdapter = true)
@@ -102,7 +103,8 @@ data class WebTodoDto(
     val reminderEnabled: Boolean,
     val isCompleted: Boolean,
     val priority: String,
-    val completedAtMillis: Long?
+    val completedAtMillis: Long?,
+    val createdAtMillis: Long = 0L
 )
 
 @JsonClass(generateAdapter = true)
@@ -133,6 +135,7 @@ data class WebServiceLogDto(
     val taskId: Long?,
     val entryType: String,
     val cadenceSnapshot: String?,
+    val prioritySnapshot: String? = null,
     val summaryTitle: String,
     val malfunctionDetails: String,
     val severity: String,
@@ -143,6 +146,7 @@ data class WebServiceLogDto(
     val serviceDurationMinutes: Int,
     val completedAtMillis: Long,
     val deadlineWasMet: Boolean,
+    val createdAtMillis: Long = 0L,
     val parts: List<WebSparePartUsedDto>
 )
 
@@ -189,7 +193,8 @@ data class WebSaveTaskReq(
     val assistantEngineers: String = "",
     val priority: String = "NORMAL",
     val reminderEnabled: Boolean = true,
-    val reminderLeadHours: Int = 24
+    val reminderLeadHours: Int = 24,
+    val machineStatus: String? = null
 )
 
 @JsonClass(generateAdapter = true)

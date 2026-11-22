@@ -15,8 +15,8 @@ class Converters {
     @TypeConverter fun fromRepeatRule(v: RepeatRule): String = v.name
     @TypeConverter fun toRepeatRule(v: String): RepeatRule = RepeatRule.valueOf(v)
 
-    @TypeConverter fun fromReminderPriority(v: ReminderPriority): String = v.name
-    @TypeConverter fun toReminderPriority(v: String): ReminderPriority = ReminderPriority.valueOf(v)
+    @TypeConverter fun fromReminderPriority(v: ReminderPriority?): String? = v?.name
+    @TypeConverter fun toReminderPriority(v: String?): ReminderPriority? = v?.let { runCatching { ReminderPriority.valueOf(it) }.getOrNull() }
 
     @TypeConverter fun fromServiceEntryType(v: ServiceEntryType): String = v.name
     @TypeConverter fun toServiceEntryType(v: String): ServiceEntryType = ServiceEntryType.valueOf(v)

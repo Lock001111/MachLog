@@ -99,20 +99,30 @@ class MaintenanceRepository(
     }
 
     // --- Maintenance Tasks ---
-    suspend fun saveTask(task: MaintenanceTaskEntity): Long {
+    suspend fun saveTask(task: MaintenanceTaskEntity, machineStatus: MachineStatus? = null): Long {
         val now = System.currentTimeMillis()
         val cleanAssistants = formatEngineerList(parseEngineerList(task.assistantEngineers), excludePic = task.personInCharge)
+        val existingCreated = if (task.id != 0L) {
+            dao.getTaskById(task.id)?.createdAtMillis ?: task.createdAtMillis
+        } else {
+            if (task.createdAtMillis > 0L) task.createdAtMillis else now
+        }
         val updated = task.copy(
             assistantEngineers = cleanAssistants,
             reminderLeadHours = task.reminderLeadHours.coerceAtLeast(1),
+            createdAtMillis = existingCreated,
             updatedAtMillis = now
         )
-        return if (task.id == 0L) {
+        val savedId = if (task.id == 0L) {
             dao.insertTask(updated)
         } else {
             dao.updateTask(updated)
             task.id
         }
+        if (machineStatus != null) {
+            updateMachineStatus(task.machineId, machineStatus)
+        }
+        return savedId
     }
 
     suspend fun deleteTask(taskId: Long) {
@@ -156,6 +166,7 @@ class MaintenanceRepository(
             entryType = entryType,
             outcome = TaskOutcome.DONE,
             cadenceSnapshot = task.cadence,
+            prioritySnapshot = task.priority,
             summaryTitle = task.title,
             malfunctionDetails = notes.ifBlank { "${task.cadence.label} maintenance completed." },
             rejectionReason = "",
@@ -165,6 +176,7 @@ class MaintenanceRepository(
             serviceDurationMinutes = actualDurationMinutes.coerceAtLeast(1),
             completedAtMillis = now,
             deadlineWasMet = deadlineWasMet,
+            createdAtMillis = task.createdAtMillis,
             updatedAtMillis = now
         )
         val partEntities = spareParts
@@ -209,6 +221,7 @@ class MaintenanceRepository(
                     reminderEnabled = task.reminderEnabled,
                     reminderLeadHours = task.reminderLeadHours,
                     lastCompletedMillis = now,
+                    createdAtMillis = now,
                     updatedAtMillis = now
                 )
             )
@@ -252,6 +265,7 @@ class MaintenanceRepository(
             entryType = ServiceEntryType.PREVENTIVE_SERVICE,
             outcome = TaskOutcome.REJECTED,
             cadenceSnapshot = task.cadence,
+            prioritySnapshot = task.priority,
             summaryTitle = task.title,
             malfunctionDetails = "Service request rejected.",
             rejectionReason = cleanReason,
@@ -261,6 +275,7 @@ class MaintenanceRepository(
             serviceDurationMinutes = 0,
             completedAtMillis = now,
             deadlineWasMet = now <= task.deadlineMillis,
+            createdAtMillis = task.createdAtMillis,
             updatedAtMillis = now
         )
         dao.insertLogWithParts(log, emptyList())
@@ -288,6 +303,7 @@ class MaintenanceRepository(
                     reminderEnabled = task.reminderEnabled,
                     reminderLeadHours = task.reminderLeadHours,
                     lastCompletedMillis = task.lastCompletedMillis,
+                    createdAtMillis = now,
                     updatedAtMillis = now
                 )
             )
@@ -297,7 +313,15 @@ class MaintenanceRepository(
     // --- To-Do Reminders ---
     suspend fun saveTodo(todo: TodoReminderEntity): Long {
         val now = System.currentTimeMillis()
-        val updated = todo.copy(updatedAtMillis = now)
+        val existingCreated = if (todo.id != 0L) {
+            dao.getTodoById(todo.id)?.createdAtMillis ?: todo.createdAtMillis
+        } else {
+            if (todo.createdAtMillis > 0L) todo.createdAtMillis else now
+        }
+        val updated = todo.copy(
+            createdAtMillis = existingCreated,
+            updatedAtMillis = now
+        )
         return if (todo.id == 0L) {
             dao.insertTodo(updated)
         } else {
@@ -348,6 +372,7 @@ class MaintenanceRepository(
                         dueAtMillis = nextDue,
                         isCompleted = false,
                         completedAtMillis = null,
+                        createdAtMillis = now,
                         updatedAtMillis = now
                     )
                 )

@@ -161,6 +161,7 @@ data class MaintenanceTaskEntity(
     val reminderEnabled: Boolean = true,
     val reminderLeadHours: Int = 24,
     val lastCompletedMillis: Long? = null,
+    val createdAtMillis: Long = System.currentTimeMillis(),
     val updatedAtMillis: Long = System.currentTimeMillis()
 )
 
@@ -200,6 +201,7 @@ data class TodoReminderEntity(
     val isCompleted: Boolean = false,
     val priority: ReminderPriority = ReminderPriority.NORMAL,
     val completedAtMillis: Long? = null,
+    val createdAtMillis: Long = System.currentTimeMillis(),
     val updatedAtMillis: Long = System.currentTimeMillis()
 )
 
@@ -233,6 +235,7 @@ data class ServiceLogEntity(
     val entryType: ServiceEntryType,
     val outcome: TaskOutcome = TaskOutcome.DONE,
     val cadenceSnapshot: Cadence? = null,
+    val prioritySnapshot: ReminderPriority? = null,
     val summaryTitle: String,
     val malfunctionDetails: String = "",
     val rejectionReason: String = "",
@@ -242,6 +245,7 @@ data class ServiceLogEntity(
     val serviceDurationMinutes: Int,
     val completedAtMillis: Long,
     val deadlineWasMet: Boolean = true,
+    val createdAtMillis: Long = System.currentTimeMillis(),
     val updatedAtMillis: Long = System.currentTimeMillis()
 )
 

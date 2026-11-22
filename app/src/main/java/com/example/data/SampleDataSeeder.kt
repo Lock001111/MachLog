@@ -166,6 +166,7 @@ object SampleDataSeeder {
                 reminderEnabled = true,
                 reminderLeadHours = 4,
                 lastCompletedMillis = now - day,
+                createdAtMillis = now - 20 * hour,
                 updatedAtMillis = now
             )
         )
@@ -183,6 +184,7 @@ object SampleDataSeeder {
                 reminderEnabled = true,
                 reminderLeadHours = 2,
                 lastCompletedMillis = now - 2 * day,
+                createdAtMillis = now - 26 * hour,
                 updatedAtMillis = now
             )
         )
@@ -201,6 +203,7 @@ object SampleDataSeeder {
                 reminderEnabled = true,
                 reminderLeadHours = 24,
                 lastCompletedMillis = now - 8 * day,
+                createdAtMillis = now - 3 * day,
                 updatedAtMillis = now
             )
         )
@@ -218,6 +221,7 @@ object SampleDataSeeder {
                 reminderEnabled = true,
                 reminderLeadHours = 24,
                 lastCompletedMillis = now - 5 * day,
+                createdAtMillis = now - 4 * day,
                 updatedAtMillis = now
             )
         )
@@ -236,6 +240,7 @@ object SampleDataSeeder {
                 reminderEnabled = true,
                 reminderLeadHours = 48,
                 lastCompletedMillis = now - 25 * day,
+                createdAtMillis = now - 10 * day,
                 updatedAtMillis = now
             )
         )
@@ -254,6 +259,7 @@ object SampleDataSeeder {
                 reminderEnabled = true,
                 reminderLeadHours = 24,
                 lastCompletedMillis = now - 32 * day,
+                createdAtMillis = now - 6 * day,
                 updatedAtMillis = now
             )
         )
@@ -272,6 +278,7 @@ object SampleDataSeeder {
                 reminderEnabled = true,
                 reminderLeadHours = 72,
                 lastCompletedMillis = now - 347 * day,
+                createdAtMillis = now - 14 * day,
                 updatedAtMillis = now
             )
         )
@@ -289,6 +296,7 @@ object SampleDataSeeder {
                 priority = ReminderPriority.HIGH,
                 reminderEnabled = true,
                 reminderLeadHours = 6,
+                createdAtMillis = now - 8 * hour,
                 updatedAtMillis = now
             )
         )
@@ -305,6 +313,7 @@ object SampleDataSeeder {
                 dueAtMillis = now + 4 * hour,
                 reminderEnabled = true,
                 priority = ReminderPriority.HIGH,
+                createdAtMillis = now - 6 * hour,
                 updatedAtMillis = now
             )
         )
@@ -319,6 +328,7 @@ object SampleDataSeeder {
                 dueAtMillis = now - 1 * hour,
                 reminderEnabled = true,
                 priority = ReminderPriority.URGENT,
+                createdAtMillis = now - 18 * hour,
                 updatedAtMillis = now
             )
         )
@@ -332,6 +342,7 @@ object SampleDataSeeder {
                 dueAtMillis = now + 3 * day,
                 reminderEnabled = true,
                 priority = ReminderPriority.NORMAL,
+                createdAtMillis = now - 2 * day,
                 updatedAtMillis = now
             )
         )
@@ -344,6 +355,7 @@ object SampleDataSeeder {
                 dueAtMillis = now + 9 * day,
                 reminderEnabled = true,
                 priority = ReminderPriority.NORMAL,
+                createdAtMillis = now - 5 * day,
                 updatedAtMillis = now
             )
         )
@@ -357,6 +369,7 @@ object SampleDataSeeder {
                 dueAtMillis = now + 25 * day,
                 reminderEnabled = true,
                 priority = ReminderPriority.HIGH,
+                createdAtMillis = now - 12 * day,
                 updatedAtMillis = now
             )
         )
@@ -374,6 +387,7 @@ object SampleDataSeeder {
                 isCompleted = true,
                 priority = ReminderPriority.URGENT,
                 completedAtMillis = now - day,
+                createdAtMillis = now - 2 * day,
                 updatedAtMillis = now - day
             )
         )
@@ -390,6 +404,7 @@ object SampleDataSeeder {
                 isCompleted = true,
                 priority = ReminderPriority.NORMAL,
                 completedAtMillis = now - 3 * day + 2 * hour,
+                createdAtMillis = now - 4 * day,
                 updatedAtMillis = now - 3 * day
             )
         )
@@ -405,6 +420,7 @@ object SampleDataSeeder {
                 isCompleted = true,
                 priority = ReminderPriority.NORMAL,
                 completedAtMillis = now - 4 * day + hour,
+                createdAtMillis = now - 11 * day,
                 updatedAtMillis = now - 4 * day
             )
         )
@@ -417,6 +433,7 @@ object SampleDataSeeder {
                 entryType = ServiceEntryType.MALFUNCTION_REPAIR,
                 outcome = TaskOutcome.DONE,
                 cadenceSnapshot = Cadence.ONCE,
+                prioritySnapshot = ReminderPriority.URGENT,
                 summaryTitle = "Thermostatic Bypass Valve Stuck Closed",
                 malfunctionDetails = "Discharge temperature hit 101C triggering thermal trip. Disassembled cooler bypass housing and replaced faulty thermal element.",
                 severity = Severity.CRITICAL,
@@ -425,6 +442,7 @@ object SampleDataSeeder {
                 serviceDurationMinutes = 115,
                 completedAtMillis = now - 5 * hour,
                 deadlineWasMet = true,
+                createdAtMillis = now - 14 * hour,
                 updatedAtMillis = now
             ),
             listOf(
@@ -440,6 +458,7 @@ object SampleDataSeeder {
                 entryType = ServiceEntryType.PREVENTIVE_SERVICE,
                 outcome = TaskOutcome.REJECTED,
                 cadenceSnapshot = Cadence.WEEKLY,
+                prioritySnapshot = ReminderPriority.HIGH,
                 summaryTitle = "Main Cylinder Seal Replacement Request",
                 malfunctionDetails = "Task rejected at shift start.",
                 rejectionReason = "Machine locked into continuous automotive rush production run; servicing not possible until weekend shutdown.",
@@ -449,6 +468,7 @@ object SampleDataSeeder {
                 serviceDurationMinutes = 0,
                 completedAtMillis = now - 16 * hour,
                 deadlineWasMet = true,
+                createdAtMillis = now - 2 * day,
                 updatedAtMillis = now
             ),
             emptyList()
@@ -461,6 +481,7 @@ object SampleDataSeeder {
                 entryType = ServiceEntryType.MALFUNCTION_REPAIR,
                 outcome = TaskOutcome.DONE,
                 cadenceSnapshot = Cadence.DAILY,
+                prioritySnapshot = ReminderPriority.URGENT,
                 summaryTitle = "Upper Sealing Jaw Burn-Through",
                 malfunctionDetails = "Film edge wrinkling caused by torn PTFE strip and drifting K-type thermocouple.",
                 severity = Severity.HIGH,
@@ -468,6 +489,7 @@ object SampleDataSeeder {
                 serviceDurationMinutes = 55,
                 completedAtMillis = now - 2 * day,
                 deadlineWasMet = true,
+                createdAtMillis = now - 2 * day - 4 * hour,
                 updatedAtMillis = now
             ),
             listOf(
@@ -483,6 +505,7 @@ object SampleDataSeeder {
                 entryType = ServiceEntryType.PREVENTIVE_SERVICE,
                 outcome = TaskOutcome.DONE,
                 cadenceSnapshot = Cadence.DAILY,
+                prioritySnapshot = ReminderPriority.HIGH,
                 summaryTitle = "Coolant Concentration & Skimmer Service",
                 malfunctionDetails = "Adjusted Brix to 8.2% and cleared tramp oil skimmer belt.",
                 severity = Severity.LOW,
@@ -491,6 +514,7 @@ object SampleDataSeeder {
                 serviceDurationMinutes = 20,
                 completedAtMillis = now - 1 * day,
                 deadlineWasMet = true,
+                createdAtMillis = now - 2 * day,
                 updatedAtMillis = now
             ),
             listOf(
@@ -505,6 +529,7 @@ object SampleDataSeeder {
                 entryType = ServiceEntryType.PREVENTIVE_SERVICE,
                 outcome = TaskOutcome.DONE,
                 cadenceSnapshot = Cadence.MONTHLY,
+                prioritySnapshot = ReminderPriority.HIGH,
                 summaryTitle = "Hydraulic Return Filter & Manifold Flush",
                 malfunctionDetails = "Replaced clogged return cartridge (2.8 bar delta) and inspected proportional valve coils.",
                 severity = Severity.MEDIUM,
@@ -513,6 +538,7 @@ object SampleDataSeeder {
                 serviceDurationMinutes = 80,
                 completedAtMillis = now - 6 * day,
                 deadlineWasMet = false,
+                createdAtMillis = now - 35 * day,
                 updatedAtMillis = now
             ),
             listOf(
@@ -528,6 +554,7 @@ object SampleDataSeeder {
                 entryType = ServiceEntryType.PREVENTIVE_SERVICE,
                 outcome = TaskOutcome.DONE,
                 cadenceSnapshot = Cadence.YEARLY,
+                prioritySnapshot = ReminderPriority.NORMAL,
                 summaryTitle = "Annual J1-J6 Gearbox Grease Replacement",
                 malfunctionDetails = "Completed full Molywhite RE No.00 grease exchange and verified payload repeatability.",
                 severity = Severity.LOW,
@@ -536,6 +563,7 @@ object SampleDataSeeder {
                 serviceDurationMinutes = 230,
                 completedAtMillis = now - 14 * day,
                 deadlineWasMet = true,
+                createdAtMillis = now - 360 * day,
                 updatedAtMillis = now
             ),
             listOf(
@@ -550,6 +578,7 @@ object SampleDataSeeder {
                 entryType = ServiceEntryType.PREVENTIVE_SERVICE,
                 outcome = TaskOutcome.DONE,
                 cadenceSnapshot = Cadence.MONTHLY,
+                prioritySnapshot = ReminderPriority.NORMAL,
                 summaryTitle = "Spindle Runout & Way-Lube Pump Check",
                 malfunctionDetails = "Runout measured 0.003mm. Replaced pneumatic way-lube inline check valve.",
                 severity = Severity.LOW,
@@ -557,6 +586,7 @@ object SampleDataSeeder {
                 serviceDurationMinutes = 85,
                 completedAtMillis = now - 21 * day,
                 deadlineWasMet = true,
+                createdAtMillis = now - 50 * day,
                 updatedAtMillis = now
             ),
             listOf(
