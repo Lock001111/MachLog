@@ -31,17 +31,22 @@ import com.example.engine.AppUpdateChecker
 import com.example.engine.Formatters
 import com.example.ui.HistoryFilterState
 import com.example.ui.TodoFilterState
+import com.example.ui.TodoGroupBy
+import com.example.ui.components.filterMachinesByQuery
 import com.example.ui.countApproachingOrOverdueTasks
+import com.example.ui.screens.COMPLETED_TODO_GROUP_TITLE
 import com.example.ui.screens.TodoFeedItem
 import com.example.ui.screens.buildTodoFeedItems
 import com.example.ui.screens.filterAndSortHistoryLogs
 import com.example.ui.screens.filterWarehouseParts
 import com.example.ui.screens.findSparePartUsageHistory
+import com.example.ui.screens.groupTodoFeedItems
 import com.example.ui.screens.paginateItems
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.BufferedInputStream
@@ -832,4 +837,82 @@ class MachinaLogicTest {
         )
         assertEquals(3, count)
     }
+
+    @Test
+    fun `readHttpRequest handles empty and truncated streams gracefully without throwing`() {
+        val emptyInput = BufferedInputStream(ByteArrayInputStream(ByteArray(0)))
+        assertNull(LocalWebServerManager.readHttpRequest(emptyInput))
+
+        val truncatedPayload = "POST /api/tasks HTTP/1.1\r\nHost: localhost\r\nContent-Length: 100\r\n\r\n{\"partial\":true"
+        val truncatedInput = BufferedInputStream(ByteArrayInputStream(truncatedPayload.toByteArray(Charsets.UTF_8)))
+        assertNull(LocalWebServerManager.readHttpRequest(truncatedInput))
+    }
+
+    @Test
+    fun `groupTodoFeedItems isolates completed entries under Completed Tasks and To-Do Reminder`() {
+        val openLinked = MaintenanceTaskEntity(
+            id = 1L,
+            machineId = 1L,
+            title = "Open Linked Check",
+            cadence = Cadence.WEEKLY,
+            deadlineMillis = 1_700_050_000_000L,
+            personInCharge = "Elena Vance",
+            reminderEnabled = true,
+            reminderLeadHours = 12
+        )
+        val openTodo = TodoReminderEntity(
+            id = 10L,
+            title = "Open Plain Reminder",
+            dueAtMillis = 1_700_040_000_000L,
+            isCompleted = false
+        )
+        val completedTodo = TodoReminderEntity(
+            id = 11L,
+            title = "Completed Plain Reminder",
+            dueAtMillis = 1_700_030_000_000L,
+            isCompleted = true,
+            completedAtMillis = 1_700_035_000_000L
+        )
+        val items = buildTodoFeedItems(
+            tasks = listOf(openLinked),
+            todos = listOf(openTodo, completedTodo),
+            machinesById = emptyMap(),
+            filter = TodoFilterState(showCompleted = true)
+        )
+
+        val sourceGrouped = groupTodoFeedItems(items, TodoGroupBy.SOURCE)
+        assertEquals(listOf("From Maintenance Tasks", "Plain To-Do Reminders", COMPLETED_TODO_GROUP_TITLE), sourceGrouped.map { it.first })
+        assertEquals(1, sourceGrouped.last().second.size)
+        assertTrue(sourceGrouped.last().second.first().isCompleted)
+
+        val flatGrouped = groupTodoFeedItems(items, TodoGroupBy.NONE)
+        assertEquals(listOf("All Reminders", COMPLETED_TODO_GROUP_TITLE), flatGrouped.map { it.first })
+        assertEquals(2, flatGrouped.first().second.size)
+        assertEquals(1, flatGrouped.last().second.size)
+    }
+
+    @Test
+    fun `filterMachinesByQuery matches machine id, description, zone, and multi-token queries`() {
+        val cnc = MachineEntity(
+            id = 1L,
+            assetCode = "CNC-01",
+            name = "5-Axis Milling Center",
+            locationZone = "Bay A",
+            modelInfo = "Haas UMC-750 Spindle"
+        )
+        val press = MachineEntity(
+            id = 2L,
+            assetCode = "PRS-04",
+            name = "Hydraulic Stamping Press",
+            locationZone = "Bay C",
+            modelInfo = "Schuler 250T"
+        )
+        val machines = listOf(cnc, press)
+
+        assertEquals(listOf(cnc), filterMachinesByQuery(machines, "CNC-01"))
+        assertEquals(listOf(cnc), filterMachinesByQuery(machines, "spindle bay a"))
+        assertEquals(listOf(press), filterMachinesByQuery(machines, "hydraulic"))
+        assertEquals(machines, filterMachinesByQuery(machines, "   "))
+    }
 }
+

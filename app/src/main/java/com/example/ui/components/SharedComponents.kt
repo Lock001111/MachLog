@@ -67,9 +67,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.PrecisionManufacturing
+import androidx.compose.material3.AlertDialog
 import com.example.data.Cadence
 import com.example.data.CustomGroupEntity
 import com.example.data.EngineerEntity
+import com.example.data.MachineEntity
 import com.example.data.MachineStatus
 import com.example.data.ReminderPriority
 import com.example.data.RepeatRule
@@ -364,8 +371,8 @@ fun DateTimePickerField(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(Modifier.height(6.dp))
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        Column(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
             OutlinedButton(
@@ -388,13 +395,19 @@ fun DateTimePickerField(
                     ).show()
                 },
                 modifier = Modifier
-                    .weight(1f)
+                    .fillMaxWidth()
                     .minimumInteractiveComponentSize()
                     .testTag("pick_date_button")
             ) {
                 Icon(Icons.Filled.CalendarToday, contentDescription = "Pick date", modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(Formatters.formatDateOnly(millis), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "Date: ${Formatters.formatDateOnly(millis)}",
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
             }
             OutlinedButton(
                 onClick = {
@@ -416,16 +429,230 @@ fun DateTimePickerField(
                     ).show()
                 },
                 modifier = Modifier
-                    .weight(0.8f)
+                    .fillMaxWidth()
                     .minimumInteractiveComponentSize()
                     .testTag("pick_time_button")
             ) {
                 Icon(Icons.Filled.AccessTime, contentDescription = "Pick time", modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(8.dp))
                 val cal = Calendar.getInstance().apply { timeInMillis = millis }
-                Text(String.format("%02d:%02d", cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE)))
+                Text(
+                    text = String.format("Time: %02d:%02d", cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE)),
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
+    }
+}
+
+fun filterMachinesByQuery(machines: List<MachineEntity>, query: String): List<MachineEntity> {
+    val tokens = query.trim().lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
+    if (tokens.isEmpty()) return machines
+    return machines.filter { m ->
+        val hay = "${m.assetCode} ${m.name} ${m.locationZone} ${m.modelInfo} ${m.notes}".lowercase()
+        tokens.all { hay.contains(it) }
+    }
+}
+
+@Composable
+fun SearchableMachinePickerField(
+    label: String,
+    selectedMachineId: Long?,
+    machines: List<MachineEntity>,
+    onSelectMachine: (MachineEntity?) -> Unit,
+    testTag: String,
+    allowNone: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    var showPicker by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    val selected = selectedMachineId?.let { id -> machines.find { it.id == id } }
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(4.dp))
+        OutlinedButton(
+            onClick = {
+                searchQuery = ""
+                showPicker = true
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .minimumInteractiveComponentSize()
+                .testTag(testTag)
+        ) {
+            Icon(Icons.Filled.PrecisionManufacturing, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = when {
+                    selected != null -> "${selected.assetCode} · ${selected.name}"
+                    allowNone -> "None (General)"
+                    else -> "Select Machine"
+                },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            Icon(Icons.Filled.Search, contentDescription = "Search machine", modifier = Modifier.size(16.dp))
+        }
+    }
+
+    if (showPicker) {
+        val filtered = remember(machines, searchQuery) {
+            filterMachinesByQuery(machines, searchQuery)
+        }
+        AlertDialog(
+            onDismissRequest = { showPicker = false },
+            title = { Text("Select Machine") },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    CompactSearchField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = "Search ID, name, zone, or description...",
+                        searchTag = "${testTag}_search_input",
+                        contentDescription = "Search machines",
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 320.dp)
+                    ) {
+                        if (allowNone) {
+                            item(key = "machine_none") {
+                                Surface(
+                                    onClick = {
+                                        onSelectMachine(null)
+                                        showPicker = false
+                                    },
+                                    color = if (selectedMachineId == null) {
+                                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (selectedMachineId == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                                    ) {
+                                        Text(
+                                            text = "None (General Reminder)",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        if (selectedMachineId == null) {
+                                            Icon(Icons.Filled.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (filtered.isEmpty()) {
+                            item(key = "machine_empty") {
+                                Text(
+                                    text = "No machines match \"$searchQuery\".",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(12.dp)
+                                )
+                            }
+                        } else {
+                            items(filtered, key = { "pick_m_${it.id}" }) { machine ->
+                                val isSel = machine.id == selectedMachineId
+                                Surface(
+                                    onClick = {
+                                        onSelectMachine(machine)
+                                        showPicker = false
+                                    },
+                                    color = if (isSel) {
+                                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                                    } else {
+                                        MaterialTheme.colorScheme.surface
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = BorderStroke(
+                                        width = if (isSel) 1.5.dp else 1.dp,
+                                        color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("${testTag}_option_${machine.id}")
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                                    ) {
+                                        Column(
+                                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                StatusPill(
+                                                    text = machine.assetCode,
+                                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                                    contentColor = MaterialTheme.colorScheme.onSurface
+                                                )
+                                                MachineStatusBadge(machine.status)
+                                            }
+                                            Text(
+                                                text = machine.name,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            val desc = listOf(machine.locationZone, machine.modelInfo, machine.notes)
+                                                .filter { it.isNotBlank() }
+                                                .joinToString(" · ")
+                                            if (desc.isNotBlank()) {
+                                                Text(
+                                                    text = desc,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                        if (isSel) {
+                                            Icon(Icons.Filled.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPicker = false }) {
+                    Text("Close")
+                }
+            }
+        )
     }
 }
 
@@ -727,32 +954,61 @@ fun ListPaginationFooter(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
         ) {
+            Text(
+                text = "Showing $startNumber–$endNumber of $totalItems",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
+
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "Showing $startNumber–$endNumber of $totalItems",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = "Per page:",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false
                 )
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Per page:",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                     listOf(25, 50, 100).forEach { sizeOption ->
-                        FilterChip(
-                            selected = pageSize == sizeOption,
+                        val selected = pageSize == sizeOption
+                        Surface(
                             onClick = { onPageSizeChange(sizeOption) },
-                            label = { Text("$sizeOption") },
-                            modifier = Modifier.testTag("${testTagPrefix}_page_size_$sizeOption")
-                        )
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (selected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.surface
+                            },
+                            contentColor = if (selected) {
+                                MaterialTheme.colorScheme.onPrimary
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                            border = BorderStroke(
+                                1.dp,
+                                if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                            ),
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("${testTagPrefix}_page_size_$sizeOption")
+                        ) {
+                            Text(
+                                text = "$sizeOption",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                maxLines = 1,
+                                softWrap = false,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -770,11 +1026,13 @@ fun ListPaginationFooter(
                             .minimumInteractiveComponentSize()
                             .testTag("${testTagPrefix}_prev_page_button")
                     ) {
-                        Text("Prev")
+                        Text("Prev", maxLines = 1, softWrap = false)
                     }
                     Text(
                         text = "Page ${safePageIndex + 1} of $totalPages",
-                        style = MaterialTheme.typography.labelLarge
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1,
+                        softWrap = false
                     )
                     OutlinedButton(
                         onClick = onNextPage,
@@ -783,7 +1041,7 @@ fun ListPaginationFooter(
                             .minimumInteractiveComponentSize()
                             .testTag("${testTagPrefix}_next_page_button")
                     ) {
-                        Text("Next")
+                        Text("Next", maxLines = 1, softWrap = false)
                     }
                 }
             }

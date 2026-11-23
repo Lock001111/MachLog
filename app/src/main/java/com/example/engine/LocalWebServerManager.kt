@@ -22,6 +22,8 @@ import com.example.data.TodoReminderEntity
 import com.example.data.WarehousePartEntity
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import android.util.Log
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -35,6 +37,7 @@ import java.io.BufferedInputStream
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
+import java.io.EOFException
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.net.ServerSocket
@@ -47,7 +50,11 @@ object LocalWebServerManager {
         .addLast(KotlinJsonAdapterFactory())
         .build()
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val serverExceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        Log.w("LocalWebServerManager", "Web portal background coroutine exception", throwable)
+    }
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + serverExceptionHandler)
     private var serverSocket: ServerSocket? = null
     private var acceptJob: Job? = null
 
@@ -112,7 +119,12 @@ object LocalWebServerManager {
             while (isActive && serverSocket?.isClosed == false) {
                 val client = runCatching { serverSocket?.accept() }.getOrNull() ?: break
                 launch {
-                    handleClient(client, context, dao, repo, prefs)
+                    runCatching {
+                        handleClient(client, context, dao, repo, prefs)
+                    }.onFailure { err ->
+                        Log.d("LocalWebServerManager", "Client connection closed: ${err.message}")
+                        runCatching { client.close() }
+                    }
                 }
             }
         }
@@ -201,62 +213,72 @@ object LocalWebServerManager {
         repo: MaintenanceRepository,
         prefs: AppPreferences
     ) {
-        socket.use { client ->
-            client.soTimeout = 15_000
-            client.tcpNoDelay = true
-            val req = readHttpRequest(BufferedInputStream(client.getInputStream())) ?: return
-            val resp = routeRequest(req, context, dao, repo, prefs)
-            writeHttpResponse(client, resp)
+        runCatching {
+            socket.use { client ->
+                client.soTimeout = 15_000
+                client.tcpNoDelay = true
+                val req = readHttpRequest(BufferedInputStream(client.getInputStream())) ?: return
+                val resp = routeRequest(req, context, dao, repo, prefs)
+                writeHttpResponse(client, resp)
+            }
+        }.onFailure { err ->
+            Log.d("LocalWebServerManager", "Client request aborted: ${err.javaClass.simpleName}: ${err.message}")
         }
     }
 
     internal fun readHttpRequest(input: BufferedInputStream): HttpRequest? {
-        val headerBytes = ByteArrayOutputStream()
-        var matched = 0
-        while (true) {
-            val b = input.read()
-            if (b == -1) break
-            headerBytes.write(b)
-            if ((matched == 0 || matched == 2) && b == '\r'.code) {
-                matched++
-            } else if ((matched == 1 || matched == 3) && b == '\n'.code) {
-                matched++
-                if (matched == 4) break
+        return runCatching {
+            val headerBytes = ByteArrayOutputStream()
+            var matched = 0
+            while (true) {
+                val b = input.read()
+                if (b == -1) break
+                headerBytes.write(b)
+                if ((matched == 0 || matched == 2) && b == '\r'.code) {
+                    matched++
+                } else if ((matched == 1 || matched == 3) && b == '\n'.code) {
+                    matched++
+                    if (matched == 4) break
+                } else {
+                    matched = if (b == '\r'.code) 1 else 0
+                }
+                if (headerBytes.size() > 65_536) return null
+            }
+            val headerText = headerBytes.toString(Charsets.ISO_8859_1.name())
+            val lines = headerText.split("\r\n").filter { it.isNotEmpty() }
+            if (lines.isEmpty()) return null
+
+            val requestParts = lines.first().split(' ')
+            if (requestParts.size < 2) return null
+            val method = requestParts[0].uppercase()
+            val rawTarget = requestParts[1]
+            val qIdx = rawTarget.indexOf('?')
+            val path = if (qIdx >= 0) rawTarget.substring(0, qIdx) else rawTarget
+            val query = if (qIdx >= 0) parseQueryParams(rawTarget.substring(qIdx + 1)) else emptyMap()
+
+            val headers = mutableMapOf<String, String>()
+            lines.drop(1).forEach { line ->
+                val colon = line.indexOf(':')
+                if (colon > 0) {
+                    headers[line.substring(0, colon).trim().lowercase()] = line.substring(colon + 1).trim()
+                }
+            }
+
+            val contentLength = headers["content-length"]?.toIntOrNull()?.coerceIn(0, 20_000_000) ?: 0
+            val body = if (contentLength > 0) {
+                val buf = ByteArray(contentLength)
+                try {
+                    DataInputStream(input).readFully(buf)
+                } catch (_: EOFException) {
+                    return null
+                }
+                buf
             } else {
-                matched = if (b == '\r'.code) 1 else 0
+                ByteArray(0)
             }
-            if (headerBytes.size() > 65_536) return null
-        }
-        val headerText = headerBytes.toString(Charsets.ISO_8859_1.name())
-        val lines = headerText.split("\r\n").filter { it.isNotEmpty() }
-        if (lines.isEmpty()) return null
 
-        val requestParts = lines.first().split(' ')
-        if (requestParts.size < 2) return null
-        val method = requestParts[0].uppercase()
-        val rawTarget = requestParts[1]
-        val qIdx = rawTarget.indexOf('?')
-        val path = if (qIdx >= 0) rawTarget.substring(0, qIdx) else rawTarget
-        val query = if (qIdx >= 0) parseQueryParams(rawTarget.substring(qIdx + 1)) else emptyMap()
-
-        val headers = mutableMapOf<String, String>()
-        lines.drop(1).forEach { line ->
-            val colon = line.indexOf(':')
-            if (colon > 0) {
-                headers[line.substring(0, colon).trim().lowercase()] = line.substring(colon + 1).trim()
-            }
-        }
-
-        val contentLength = headers["content-length"]?.toIntOrNull()?.coerceIn(0, 20_000_000) ?: 0
-        val body = if (contentLength > 0) {
-            val buf = ByteArray(contentLength)
-            DataInputStream(input).readFully(buf)
-            buf
-        } else {
-            ByteArray(0)
-        }
-
-        return HttpRequest(method = method, path = path, query = query, headers = headers, body = body)
+            HttpRequest(method = method, path = path, query = query, headers = headers, body = body)
+        }.getOrNull()
     }
 
     private fun writeHttpResponse(socket: Socket, resp: HttpResponse) {

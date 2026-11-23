@@ -233,6 +233,46 @@ fun buildTodoFeedItems(
     }
 }
 
+const val COMPLETED_TODO_GROUP_TITLE = "Completed Tasks & To-Do Reminder"
+
+fun groupTodoFeedItems(
+    items: List<TodoFeedItem>,
+    groupBy: TodoGroupBy
+): List<Pair<String, List<TodoFeedItem>>> {
+    val ongoingItems = items.filterNot { it.isCompleted }
+    val completedItems = items.filter { it.isCompleted }
+
+    val ongoingSections = when {
+        ongoingItems.isEmpty() -> emptyList()
+        groupBy == TodoGroupBy.NONE -> listOf("All Reminders" to ongoingItems)
+        groupBy == TodoGroupBy.SOURCE -> listOfNotNull(
+            ongoingItems.filterIsInstance<TodoFeedItem.LinkedTaskReminder>()
+                .takeIf { it.isNotEmpty() }
+                ?.let { "From Maintenance Tasks" to it },
+            ongoingItems.filterIsInstance<TodoFeedItem.StandaloneTodo>()
+                .takeIf { it.isNotEmpty() }
+                ?.let { "Plain To-Do Reminders" to it }
+        )
+        groupBy == TodoGroupBy.PRIORITY -> listOf(
+            ReminderPriority.URGENT,
+            ReminderPriority.HIGH,
+            ReminderPriority.NORMAL
+        ).mapNotNull { prio ->
+            val list = ongoingItems.filter { it.priority == prio }
+            if (list.isEmpty()) null else "${prio.label} Priority" to list
+        }
+        else -> ongoingItems.groupBy { item ->
+            item.personInCharge.ifBlank { "Unassigned" }
+        }.toList()
+    }
+
+    return if (completedItems.isNotEmpty()) {
+        ongoingSections + (COMPLETED_TODO_GROUP_TITLE to completedItems)
+    } else {
+        ongoingSections
+    }
+}
+
 fun filterAndSortHistoryLogs(
     serviceLogs: List<ServiceLogWithParts>,
     machinesById: Map<Long, MachineEntity>,
@@ -317,28 +357,7 @@ fun TodoRemindersSubTab(
     }
 
     val groupedTodos = remember(pagedTodos.items, filter.groupBy) {
-        when (filter.groupBy) {
-            TodoGroupBy.NONE -> listOf("All Reminders" to pagedTodos.items)
-            TodoGroupBy.SOURCE -> listOfNotNull(
-                pagedTodos.items.filterIsInstance<TodoFeedItem.LinkedTaskReminder>()
-                    .takeIf { it.isNotEmpty() }
-                    ?.let { "From Maintenance Tasks" to it },
-                pagedTodos.items.filterIsInstance<TodoFeedItem.StandaloneTodo>()
-                    .takeIf { it.isNotEmpty() }
-                    ?.let { "Plain To-Do Reminders" to it }
-            )
-            TodoGroupBy.PRIORITY -> listOf(
-                ReminderPriority.URGENT,
-                ReminderPriority.HIGH,
-                ReminderPriority.NORMAL
-            ).mapNotNull { prio ->
-                val list = pagedTodos.items.filter { it.priority == prio }
-                if (list.isEmpty()) null else "${prio.label} Priority" to list
-            }
-            TodoGroupBy.PIC -> pagedTodos.items.groupBy { item ->
-                item.personInCharge.ifBlank { "Unassigned" }
-            }.toList()
-        }
+        groupTodoFeedItems(pagedTodos.items, filter.groupBy)
     }
 
     val activeFilterCount = remember(filter) {
@@ -562,7 +581,8 @@ fun TodoRemindersSubTab(
                         FilterChip(
                             selected = filter.repeatRule == null,
                             onClick = { onUpdateFilter { it.copy(repeatRule = null, currentPage = 0) } },
-                            label = { Text("All Schedules") }
+                            label = { Text("All Cadences") },
+                            modifier = Modifier.testTag("todo_rule_chip_all")
                         )
                         RepeatRule.entries.forEach { rule ->
                             FilterChip(
@@ -627,12 +647,20 @@ fun TodoRemindersSubTab(
         } else {
             groupedTodos.forEach { (sectionTitle, sectionItems) ->
                 val isCollapsed = collapsedGroups[sectionTitle] == true
+                val isCompletedSection = sectionTitle == COMPLETED_TODO_GROUP_TITLE
                 val sectionOverdue = sectionItems.count { !it.isCompleted && it.dueAtMillis < now }
 
-                if (filter.groupBy != TodoGroupBy.NONE) {
+                if (filter.groupBy != TodoGroupBy.NONE || isCompletedSection) {
                     item(key = "todo_group_header_$sectionTitle") {
                         Surface(
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+                            color = if (isCompletedSection) {
+                                sem.operationalContainer.copy(alpha = 0.72f)
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)
+                            },
+                            border = if (isCompletedSection) {
+                                BorderStroke(1.dp, sem.operational.copy(alpha = 0.45f))
+                            } else null,
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier
                                 .fillMaxWidth()

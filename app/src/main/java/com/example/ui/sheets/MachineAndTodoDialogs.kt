@@ -58,6 +58,7 @@ import com.example.data.RepeatRule
 import com.example.data.TodoReminderEntity
 import com.example.ui.components.DateTimePickerField
 import com.example.ui.components.EngineerPickerField
+import com.example.ui.components.SearchableMachinePickerField
 import com.example.ui.theme.groupColorForKey
 import java.util.concurrent.TimeUnit
 
@@ -427,7 +428,6 @@ fun TodoEditorDialog(
     var titleError by remember { mutableStateOf(false) }
     var picError by remember { mutableStateOf(false) }
 
-    var showMachineMenu by remember { mutableStateOf(false) }
     var showGroupMenu by remember { mutableStateOf(false) }
 
     AlertDialog(
@@ -517,33 +517,14 @@ fun TodoEditorDialog(
                     )
                 }
 
-                Box {
-                    val m = machineId?.let { mid -> machines.find { it.id == mid } }
-                    OutlinedButton(
-                        onClick = { showMachineMenu = true },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .minimumInteractiveComponentSize()
-                    ) {
-                        Text("Machine: ${m?.let { "${it.assetCode} ${it.name}" } ?: "None (General)"}", modifier = Modifier.weight(1f))
-                        Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
-                    }
-                    DropdownMenu(expanded = showMachineMenu, onDismissRequest = { showMachineMenu = false }) {
-                        DropdownMenuItem(text = { Text("None (General)") }, onClick = {
-                            machineId = null
-                            showMachineMenu = false
-                        })
-                        machines.forEach { machine ->
-                            DropdownMenuItem(
-                                text = { Text("${machine.assetCode} · ${machine.name}") },
-                                onClick = {
-                                    machineId = machine.id
-                                    showMachineMenu = false
-                                }
-                            )
-                        }
-                    }
-                }
+                SearchableMachinePickerField(
+                    label = "Linked Machine (Optional)",
+                    selectedMachineId = machineId,
+                    machines = machines,
+                    onSelectMachine = { chosen -> machineId = chosen?.id },
+                    testTag = "todo_editor_machine_picker",
+                    allowNone = true
+                )
 
                 Box {
                     val g = groupId?.let { gid -> groups.find { it.id == gid } }

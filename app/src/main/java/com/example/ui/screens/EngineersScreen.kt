@@ -238,6 +238,8 @@ fun EngineersScreen(
             engineer = inspectingEngineer,
             tasks = assignedTasks,
             machinesById = machinesById,
+            pageSize = pageSize,
+            onPageSizeChange = onSetListPageSize,
             onDismiss = { inspectingEngineerId = null },
             onCompleteTask = onCompleteTask,
             onRejectTask = onRejectTask,
@@ -263,6 +265,8 @@ fun EngineersScreen(
             engineer = inspectingHistoryEngineer,
             logs = historicalLogs,
             machinesById = machinesById,
+            pageSize = pageSize,
+            onPageSizeChange = onSetListPageSize,
             onDismiss = { inspectingHistoryEngineerId = null },
             onViewInHistoryTab = {
                 inspectingHistoryEngineerId = null
@@ -486,6 +490,8 @@ private fun EngineerActiveTasksDialog(
     engineer: EngineerEntity,
     tasks: List<MaintenanceTaskEntity>,
     machinesById: Map<Long, MachineEntity>,
+    pageSize: Int,
+    onPageSizeChange: (Int) -> Unit,
     onDismiss: () -> Unit,
     onCompleteTask: (MaintenanceTaskEntity) -> Unit,
     onRejectTask: (MaintenanceTaskEntity) -> Unit,
@@ -494,17 +500,39 @@ private fun EngineerActiveTasksDialog(
 ) {
     val now = System.currentTimeMillis()
     val sem = LocalMachinaColors.current
+    var modalPage by remember(engineer.id) { mutableIntStateOf(0) }
+    val paged = remember(tasks, modalPage, pageSize) {
+        paginateItems(tasks, modalPage, pageSize)
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Column {
-                Text("${engineer.name} · Active Tasks (${tasks.size})")
-                Text(
-                    text = "${engineer.role} · ${engineer.shift}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            Surface(
+                color = sem.infoContainer,
+                border = BorderStroke(1.5.dp, sem.info.copy(alpha = 0.65f)),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.padding(12.dp)
+                ) {
+                    Icon(Icons.Filled.TaskAlt, contentDescription = null, tint = sem.info)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "${engineer.name} · Active Tasks (${tasks.size})",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "OPEN ASSIGNMENTS · ${engineer.role} · ${engineer.shift}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = sem.info
+                        )
+                    }
+                }
             }
         },
         text = {
@@ -521,15 +549,15 @@ private fun EngineerActiveTasksDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
-                    tasks.forEach { task ->
+                    paged.items.forEach { task ->
                         val machine = machinesById[task.machineId]
                         val isPic = task.personInCharge.equals(engineer.name, ignoreCase = true)
                         val isOverdue = task.deadlineMillis < now
                         Card(
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                             border = BorderStroke(
-                                width = 1.dp,
-                                color = if (isOverdue) sem.critical.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outlineVariant
+                                width = 1.5.dp,
+                                color = if (isOverdue) sem.critical else sem.info.copy(alpha = 0.65f)
                             ),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
@@ -538,7 +566,7 @@ private fun EngineerActiveTasksDialog(
                         ) {
                             Column(
                                 verticalArrangement = Arrangement.spacedBy(6.dp),
-                                modifier = Modifier.padding(10.dp)
+                                modifier = Modifier.padding(12.dp)
                             ) {
                                 Row(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -549,8 +577,8 @@ private fun EngineerActiveTasksDialog(
                                     CadencePill(task.cadence)
                                     StatusPill(
                                         text = if (isPic) "PIC" else "Assistant",
-                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                        containerColor = sem.infoContainer,
+                                        contentColor = sem.info
                                     )
                                 }
                                 Text(task.title, style = MaterialTheme.typography.titleSmall)
@@ -594,6 +622,22 @@ private fun EngineerActiveTasksDialog(
                             }
                         }
                     }
+
+                    ListPaginationFooter(
+                        startNumber = paged.startNumber,
+                        endNumber = paged.endNumber,
+                        totalItems = paged.totalItems,
+                        safePageIndex = paged.safePageIndex,
+                        totalPages = paged.totalPages,
+                        pageSize = pageSize,
+                        onPageSizeChange = { newSize ->
+                            modalPage = 0
+                            onPageSizeChange(newSize)
+                        },
+                        onPrevPage = { modalPage = (paged.safePageIndex - 1).coerceAtLeast(0) },
+                        onNextPage = { modalPage = (paged.safePageIndex + 1).coerceAtMost(paged.totalPages - 1) },
+                        testTagPrefix = "engineer_active_modal"
+                    )
                 }
             }
         },
@@ -622,21 +666,45 @@ private fun EngineerHistoryTasksDialog(
     engineer: EngineerEntity,
     logs: List<ServiceLogWithParts>,
     machinesById: Map<Long, MachineEntity>,
+    pageSize: Int,
+    onPageSizeChange: (Int) -> Unit,
     onDismiss: () -> Unit,
     onViewInHistoryTab: () -> Unit
 ) {
     val sem = LocalMachinaColors.current
+    var modalPage by remember(engineer.id) { mutableIntStateOf(0) }
+    val paged = remember(logs, modalPage, pageSize) {
+        paginateItems(logs, modalPage, pageSize)
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Column {
-                Text("${engineer.name} · History (${logs.size})")
-                Text(
-                    text = "${engineer.role} · ${engineer.shift}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            Surface(
+                color = sem.operationalContainer,
+                border = BorderStroke(1.5.dp, sem.operational.copy(alpha = 0.65f)),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.padding(12.dp)
+                ) {
+                    Icon(Icons.Filled.History, contentDescription = null, tint = sem.operational)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "${engineer.name} · History (${logs.size})",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "COMPLETED & REJECTED LOGS · ${engineer.role} · ${engineer.shift}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = sem.operational
+                        )
+                    }
+                }
             }
         },
         text = {
@@ -653,16 +721,16 @@ private fun EngineerHistoryTasksDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
-                    logs.forEach { entry ->
+                    paged.items.forEach { entry ->
                         val log = entry.log
                         val machine = machinesById[log.machineId]
                         val isPic = log.personInCharge.equals(engineer.name, ignoreCase = true)
                         val isRejected = log.outcome == TaskOutcome.REJECTED
                         Card(
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                             border = BorderStroke(
-                                width = 1.dp,
-                                color = if (isRejected) sem.critical.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outlineVariant
+                                width = 1.5.dp,
+                                color = if (isRejected) sem.critical else sem.operational.copy(alpha = 0.65f)
                             ),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
@@ -671,7 +739,7 @@ private fun EngineerHistoryTasksDialog(
                         ) {
                             Column(
                                 verticalArrangement = Arrangement.spacedBy(5.dp),
-                                modifier = Modifier.padding(10.dp)
+                                modifier = Modifier.padding(12.dp)
                             ) {
                                 Row(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -683,8 +751,8 @@ private fun EngineerHistoryTasksDialog(
                                     log.cadenceSnapshot?.let { CadencePill(it) }
                                     StatusPill(
                                         text = if (isPic) "PIC" else "Assistant",
-                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                        containerColor = sem.operationalContainer,
+                                        contentColor = sem.operational
                                     )
                                 }
                                 Text(log.summaryTitle, style = MaterialTheme.typography.titleSmall)
@@ -725,6 +793,22 @@ private fun EngineerHistoryTasksDialog(
                             }
                         }
                     }
+
+                    ListPaginationFooter(
+                        startNumber = paged.startNumber,
+                        endNumber = paged.endNumber,
+                        totalItems = paged.totalItems,
+                        safePageIndex = paged.safePageIndex,
+                        totalPages = paged.totalPages,
+                        pageSize = pageSize,
+                        onPageSizeChange = { newSize ->
+                            modalPage = 0
+                            onPageSizeChange(newSize)
+                        },
+                        onPrevPage = { modalPage = (paged.safePageIndex - 1).coerceAtLeast(0) },
+                        onNextPage = { modalPage = (paged.safePageIndex + 1).coerceAtMost(paged.totalPages - 1) },
+                        testTagPrefix = "engineer_history_modal"
+                    )
                 }
             }
         },

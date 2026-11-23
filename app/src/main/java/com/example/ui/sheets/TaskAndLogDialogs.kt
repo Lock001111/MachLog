@@ -74,6 +74,7 @@ import com.example.ui.components.AssistantEngineersSelector
 import com.example.ui.components.CompactSearchField
 import com.example.ui.components.DateTimePickerField
 import com.example.ui.components.EngineerPickerField
+import com.example.ui.components.SearchableMachinePickerField
 import com.example.ui.components.StatusPill
 import com.example.ui.screens.filterWarehouseParts
 import java.util.concurrent.TimeUnit
@@ -149,7 +150,6 @@ fun TaskEditorDialog(
     var titleError by remember { mutableStateOf(false) }
     var picError by remember { mutableStateOf(false) }
 
-    var showMachineDropdown by remember { mutableStateOf(false) }
     var showGroupDropdown by remember { mutableStateOf(false) }
 
     AlertDialog(
@@ -170,35 +170,18 @@ fun TaskEditorDialog(
                     )
                 }
 
-                // Machine Picker
-                Box {
-                    val m = machines.find { it.id == selectedMachineId }
-                    OutlinedButton(
-                        onClick = { showMachineDropdown = true },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .minimumInteractiveComponentSize()
-                            .testTag("task_editor_machine_picker")
-                    ) {
-                        Text(
-                            text = m?.let { "${it.assetCode} · ${it.name}" } ?: "Select Machine",
-                            modifier = Modifier.weight(1f)
-                        )
-                        Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
-                    }
-                    DropdownMenu(expanded = showMachineDropdown, onDismissRequest = { showMachineDropdown = false }) {
-                        machines.forEach { machine ->
-                            DropdownMenuItem(
-                                text = { Text("${machine.assetCode} · ${machine.name}") },
-                                onClick = {
-                                    selectedMachineId = machine.id
-                                    machineStatus = machine.status
-                                    showMachineDropdown = false
-                                }
-                            )
+                SearchableMachinePickerField(
+                    label = "Machine *",
+                    selectedMachineId = selectedMachineId,
+                    machines = machines,
+                    onSelectMachine = { chosen ->
+                        if (chosen != null) {
+                            selectedMachineId = chosen.id
+                            machineStatus = chosen.status
                         }
-                    }
-                }
+                    },
+                    testTag = "task_editor_machine_picker"
+                )
 
                 Text("Machine Current Condition / Status", style = MaterialTheme.typography.labelLarge)
                 Row(

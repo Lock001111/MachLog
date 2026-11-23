@@ -266,7 +266,7 @@ private fun MachineListPane(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = modifier
     ) {
-        item(key = "fleet_hero") {
+        item(key = "machines_hero") {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -276,7 +276,7 @@ private fun MachineListPane(
                 Column {
                     Image(
                         painter = painterResource(id = R.drawable.img_factory_banner_1795188995484),
-                        contentDescription = "Factory equipment fleet overview illustration",
+                        contentDescription = "Factory equipment machines overview illustration",
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -353,29 +353,7 @@ private fun MachineListPane(
                             )
                         }
                     },
-                    testTagPrefix = "machines",
-                    inlineQuickActions = {
-                        TextButton(
-                            onClick = onManageGroups,
-                            modifier = Modifier
-                                .minimumInteractiveComponentSize()
-                                .testTag("machines_manage_groups_button")
-                        ) {
-                            Icon(Icons.Filled.FolderSpecial, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Groups")
-                        }
-                        OutlinedButton(
-                            onClick = onImportExcel,
-                            modifier = Modifier
-                                .minimumInteractiveComponentSize()
-                                .testTag("machines_import_excel_button")
-                        ) {
-                            Icon(Icons.Filled.TableView, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Import")
-                        }
-                    }
+                    testTagPrefix = "machines"
                 ) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -433,6 +411,35 @@ private fun MachineListPane(
                                 )
                             }
                         }
+                    }
+                }
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    OutlinedButton(
+                        onClick = onManageGroups,
+                        modifier = Modifier
+                            .weight(1f)
+                            .minimumInteractiveComponentSize()
+                            .testTag("machines_manage_groups_button")
+                    ) {
+                        Icon(Icons.Filled.FolderSpecial, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Groups", maxLines = 1)
+                    }
+                    OutlinedButton(
+                        onClick = onImportExcel,
+                        modifier = Modifier
+                            .weight(1f)
+                            .minimumInteractiveComponentSize()
+                            .testTag("machines_import_excel_button")
+                    ) {
+                        Icon(Icons.Filled.TableView, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Import Excel", maxLines = 1)
                     }
                 }
             }

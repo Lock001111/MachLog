@@ -350,26 +350,6 @@ private fun ActiveTasksSubTab(
                             },
                             modifier = Modifier.testTag("task_date_sort_chip")
                         )
-                        TextButton(
-                            onClick = onManageGroups,
-                            modifier = Modifier
-                                .minimumInteractiveComponentSize()
-                                .testTag("manage_groups_shortcut")
-                        ) {
-                            Icon(Icons.Filled.FolderSpecial, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Groups")
-                        }
-                        OutlinedButton(
-                            onClick = onImportExcel,
-                            modifier = Modifier
-                                .minimumInteractiveComponentSize()
-                                .testTag("tasks_import_excel_button")
-                        ) {
-                            Icon(Icons.Filled.TableView, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Import")
-                        }
                     }
                 ) {
                     Row(
@@ -486,6 +466,35 @@ private fun ActiveTasksSubTab(
                                 )
                             }
                         }
+                    }
+                }
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    OutlinedButton(
+                        onClick = onManageGroups,
+                        modifier = Modifier
+                            .weight(1f)
+                            .minimumInteractiveComponentSize()
+                            .testTag("manage_groups_shortcut")
+                    ) {
+                        Icon(Icons.Filled.FolderSpecial, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Groups", maxLines = 1)
+                    }
+                    OutlinedButton(
+                        onClick = onImportExcel,
+                        modifier = Modifier
+                            .weight(1f)
+                            .minimumInteractiveComponentSize()
+                            .testTag("tasks_import_excel_button")
+                    ) {
+                        Icon(Icons.Filled.TableView, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Import Excel", maxLines = 1)
                     }
                 }
             }

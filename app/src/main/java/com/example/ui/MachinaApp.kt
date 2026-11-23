@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
@@ -14,8 +15,10 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -46,9 +49,11 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -64,9 +69,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.theme.LocalMachinaColors
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -306,28 +313,38 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                         )
                     },
                     actions = {
-                        IconButton(
-                            onClick = {
-                                viewModel.refreshPcWebAddresses()
-                                showPcWebDialog = true
-                            },
-                            modifier = Modifier.testTag("topbar_pc_web_button")
+                        val sem = LocalMachinaColors.current
+                        val pcOnline = state.webPortalStatus.isRunning
+                        Surface(
+                            onClick = { viewModel.setPcWebEnabled(!pcOnline) },
+                            shape = RoundedCornerShape(999.dp),
+                            color = if (pcOnline) sem.operationalContainer else MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = if (pcOnline) sem.operational else MaterialTheme.colorScheme.onSurfaceVariant,
+                            border = BorderStroke(
+                                width = 1.dp,
+                                color = if (pcOnline) sem.operational.copy(alpha = 0.65f) else MaterialTheme.colorScheme.outlineVariant
+                            ),
+                            modifier = Modifier
+                                .padding(end = 4.dp)
+                                .minimumInteractiveComponentSize()
+                                .testTag("topbar_pc_web_button")
                         ) {
-                            BadgedBox(
-                                badge = {
-                                    if (state.webPortalStatus.isRunning) {
-                                        Badge(containerColor = MaterialTheme.colorScheme.primary)
-                                    }
-                                }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Filled.Computer,
-                                    contentDescription = stringResource(R.string.action_pc_web),
-                                    tint = if (state.webPortalStatus.isRunning) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurface
-                                    }
+                                    contentDescription = if (pcOnline) "Disable PC Web Access" else "Enable PC Web Access",
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(5.dp))
+                                Text(
+                                    text = if (pcOnline) "PC ON" else "PC OFF",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
                         }

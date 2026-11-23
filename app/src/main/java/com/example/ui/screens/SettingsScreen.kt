@@ -110,17 +110,6 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.padding(14.dp)
                 ) {
-                    IconButton(
-                        onClick = onNavigateBack,
-                        modifier = Modifier
-                            .minimumInteractiveComponentSize()
-                            .testTag("settings_back_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back to previous screen"
-                        )
-                    }
                     Icon(
                         imageVector = Icons.Filled.Settings,
                         contentDescription = null,
