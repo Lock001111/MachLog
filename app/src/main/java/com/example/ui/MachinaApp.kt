@@ -730,7 +730,9 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                                     showPcWebDialog = true
                                 },
                                 onSetAutoCheckUpdates = viewModel::setAutoCheckUpdates,
-                                onCheckForUpdates = { viewModel.checkForUpdates(manual = true) }
+                                onCheckForUpdates = { viewModel.checkForUpdates(manual = true) },
+                                onOpenDetectedUpdate = viewModel::openLatestUpdateDialog,
+                                onSaveGithubConfig = viewModel::setGithubUpdateConfig
                             )
                         }
                     }

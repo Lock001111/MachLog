@@ -29,7 +29,9 @@ data class UserPreferences(
     val todoPageSize: Int = 25,
     val autoCheckUpdates: Boolean = true,
     val lastUpdateCheckMillis: Long? = null,
-    val latestKnownVersion: String? = null
+    val latestKnownVersion: String? = null,
+    val githubRepo: String = "Lock001111/MachLog",
+    val githubToken: String = ""
 )
 
 class AppPreferences(private val context: Context) {
@@ -49,6 +51,8 @@ class AppPreferences(private val context: Context) {
         val AUTO_CHECK_UPDATES = booleanPreferencesKey("auto_check_updates")
         val LAST_UPDATE_CHECK_MILLIS = longPreferencesKey("last_update_check_millis")
         val LATEST_KNOWN_VERSION = stringPreferencesKey("latest_known_version")
+        val GITHUB_REPO = stringPreferencesKey("github_repo")
+        val GITHUB_TOKEN = stringPreferencesKey("github_token")
     }
 
     val preferencesFlow: Flow<UserPreferences> = context.dataStore.data.map { prefs ->
@@ -70,7 +74,9 @@ class AppPreferences(private val context: Context) {
             todoPageSize = pageSize,
             autoCheckUpdates = prefs[Keys.AUTO_CHECK_UPDATES] ?: true,
             lastUpdateCheckMillis = prefs[Keys.LAST_UPDATE_CHECK_MILLIS],
-            latestKnownVersion = prefs[Keys.LATEST_KNOWN_VERSION]
+            latestKnownVersion = prefs[Keys.LATEST_KNOWN_VERSION],
+            githubRepo = prefs[Keys.GITHUB_REPO]?.takeIf { it.isNotBlank() } ?: "Lock001111/MachLog",
+            githubToken = prefs[Keys.GITHUB_TOKEN] ?: ""
         )
     }
 
@@ -136,6 +142,27 @@ class AppPreferences(private val context: Context) {
             it[Keys.LAST_UPDATE_CHECK_MILLIS] = millis
             if (!latestTag.isNullOrBlank()) {
                 it[Keys.LATEST_KNOWN_VERSION] = latestTag
+            }
+        }
+    }
+
+    suspend fun setGithubRepo(repo: String) {
+        val normalized = repo.trim()
+            .removePrefix("https://github.com/")
+            .removePrefix("http://github.com/")
+            .removeSuffix(".git")
+            .trim('/')
+            .ifEmpty { "Lock001111/MachLog" }
+        context.dataStore.edit { it[Keys.GITHUB_REPO] = normalized }
+    }
+
+    suspend fun setGithubToken(token: String) {
+        val cleaned = token.trim()
+        context.dataStore.edit {
+            if (cleaned.isEmpty()) {
+                it.remove(Keys.GITHUB_TOKEN)
+            } else {
+                it[Keys.GITHUB_TOKEN] = cleaned
             }
         }
     }

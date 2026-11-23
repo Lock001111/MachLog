@@ -33,14 +33,32 @@ object AppUpdateChecker {
     const val TAGS_API_URL = "https://api.github.com/repos/Lock001111/MachLog/tags?per_page=5"
     const val RELEASES_PAGE_URL = "https://github.com/Lock001111/MachLog/releases"
 
+    fun normalizeRepoSlug(raw: String): String {
+        val cleaned = raw.trim()
+            .removePrefix("https://github.com/")
+            .removePrefix("http://github.com/")
+            .removeSuffix(".git")
+            .trim('/')
+        return if (cleaned.contains('/')) cleaned else GITHUB_REPO
+    }
+
     suspend fun checkLatestRelease(
         currentVersionName: String,
-        currentVersionCode: Int
+        currentVersionCode: Int,
+        githubRepo: String = GITHUB_REPO,
+        githubToken: String = ""
     ): UpdateCheckOutcome = withContext(Dispatchers.IO) {
+        val repoSlug = normalizeRepoSlug(githubRepo)
+        val token = githubToken.trim()
+        val listUrl = "https://api.github.com/repos/$repoSlug/releases?per_page=10"
+        val latestUrl = "https://api.github.com/repos/$repoSlug/releases/latest"
+        val tagsUrl = "https://api.github.com/repos/$repoSlug/tags?per_page=5"
+        val releasesPageUrl = "https://github.com/$repoSlug/releases"
+
         try {
             // Query /releases?per_page=10 so pre-releases and newly tagged builds are included
             // (GitHub's /releases/latest returns 404 if a release is marked pre-release).
-            val listResp = httpGet(RELEASES_LIST_API_URL, currentVersionName)
+            val listResp = httpGet(listUrl, currentVersionName, token)
             if (listResp.code in 200..299) {
                 val parsed = parseReleasesArrayJson(
                     json = listResp.body,
@@ -52,8 +70,12 @@ object AppUpdateChecker {
                 }
             }
 
-            // Fallback to /releases/latest
-            val latestResp = httpGet(RELEASES_API_URL, currentVersionName)
+            // Fallback to /releases/latest (only if list didn't fail auth/404)
+            val latestResp = if (listResp.code == 401 || listResp.code == 404) {
+                listResp
+            } else {
+                httpGet(latestUrl, currentVersionName, token)
+            }
             if (latestResp.code in 200..299) {
                 val parsed = parseReleaseJson(
                     json = latestResp.body,
@@ -65,21 +87,33 @@ object AppUpdateChecker {
                 }
             }
 
-            if (listResp.code == 403 || latestResp.code == 403) {
+            if (listResp.code == 401 || latestResp.code == 401) {
                 return@withContext UpdateCheckOutcome(
-                    errorMessage = "GitHub API rate limit reached or repo access restricted (HTTP 403). Try again later or check https://github.com/$GITHUB_REPO/releases."
+                    errorMessage = "GitHub Token rejected (HTTP 401 Unauthorized) for $repoSlug. Check or clear your token in App Updates settings."
                 )
             }
 
-            // If no Releases exist at all, inspect /tags to give a clear actionable diagnostic
-            val tagsResp = httpGet(TAGS_API_URL, currentVersionName)
+            if (listResp.code == 403 || latestResp.code == 403) {
+                return@withContext UpdateCheckOutcome(
+                    errorMessage = "GitHub API rate limit reached or repo access denied (HTTP 403). Add a read-only GitHub Token or try again later."
+                )
+            }
+
+            if (listResp.code == 404) {
+                return@withContext UpdateCheckOutcome(
+                    errorMessage = "GitHub returned HTTP 404 for \"$repoSlug\". If the repository is Private, either make it Public on GitHub or add a read-only GitHub Token below."
+                )
+            }
+
+            // Repo is reachable (HTTP 200) but has 0 non-draft releases — check /tags to give a clear hint
+            val tagsResp = httpGet(tagsUrl, currentVersionName, token)
             val tagHint = if (tagsResp.code in 200..299) {
                 runCatching {
                     val arr = JSONArray(tagsResp.body)
                     if (arr.length() > 0) {
                         val topTag = arr.optJSONObject(0)?.optString("name", "").orEmpty()
                         if (topTag.isNotEmpty()) {
-                            "Git tag \"$topTag\" exists, but no published GitHub Release + APK was found. Check Actions workflow permissions (Read & write) or publish a GitHub Release."
+                            "Git tag \"$topTag\" exists on $repoSlug, but no published GitHub Release + APK was found. Check the GitHub Actions workflow or publish a Release."
                         } else null
                     } else null
                 }.getOrNull()
@@ -91,12 +125,12 @@ object AppUpdateChecker {
                     currentVersionCode = currentVersionCode,
                     latestTag = "v$currentVersionName",
                     versionLabel = "v$currentVersionName",
-                    releaseNotes = tagHint ?: "No published GitHub releases found yet on $GITHUB_REPO.",
+                    releaseNotes = tagHint ?: "Connected to $repoSlug, but 0 published GitHub Releases exist yet.",
                     apkDownloadUrl = null,
-                    htmlUrl = RELEASES_PAGE_URL,
+                    htmlUrl = releasesPageUrl,
                     isUpdateAvailable = false
                 ),
-                errorMessage = tagHint ?: "No published GitHub releases found yet for $GITHUB_REPO."
+                errorMessage = tagHint ?: "Connected to $repoSlug, but 0 published GitHub Releases were found (drafts are ignored)."
             )
         } catch (t: Throwable) {
             UpdateCheckOutcome(
@@ -107,7 +141,7 @@ object AppUpdateChecker {
 
     private data class HttpFetchResult(val code: Int, val body: String)
 
-    private fun httpGet(urlStr: String, currentVersionName: String): HttpFetchResult {
+    private fun httpGet(urlStr: String, currentVersionName: String, githubToken: String = ""): HttpFetchResult {
         var conn: HttpURLConnection? = null
         return try {
             val url = URL(urlStr)
@@ -118,6 +152,9 @@ object AppUpdateChecker {
                 setRequestProperty("Accept", "application/vnd.github+json")
                 setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
                 setRequestProperty("User-Agent", "MachinaLog-Android/$currentVersionName")
+                if (githubToken.isNotBlank()) {
+                    setRequestProperty("Authorization", "Bearer $githubToken")
+                }
             }
             val code = conn.responseCode
             val stream = if (code in 200..299) conn.inputStream else conn.errorStream

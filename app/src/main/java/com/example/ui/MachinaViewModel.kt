@@ -151,6 +151,7 @@ data class MachineFilterState(
 
 data class UpdateUiBundle(
     val availableUpdate: AppUpdateInfo? = null,
+    val latestDetectedUpdate: AppUpdateInfo? = null,
     val isCheckingUpdate: Boolean = false,
     val updateStatusText: String? = null
 )
@@ -183,6 +184,7 @@ data class MachinaUiState(
     val engineers: List<EngineerEntity> = emptyList(),
     val webPortalStatus: WebPortalStatus = WebPortalStatus(),
     val availableUpdate: AppUpdateInfo? = null,
+    val latestDetectedUpdate: AppUpdateInfo? = null,
     val isCheckingUpdate: Boolean = false,
     val updateStatusText: String? = null,
     val isBusy: Boolean = false
@@ -226,10 +228,16 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
     private val _pendingExcelImportPreview = MutableStateFlow<ExcelImportPreview?>(null)
     private val _isBusy = MutableStateFlow(false)
     private val _availableUpdate = MutableStateFlow<AppUpdateInfo?>(null)
+    private val _latestDetectedUpdate = MutableStateFlow<AppUpdateInfo?>(null)
     private val _isCheckingUpdate = MutableStateFlow(false)
     private val _updateStatusText = MutableStateFlow<String?>(null)
-    private val _updateBundleFlow = combine(_availableUpdate, _isCheckingUpdate, _updateStatusText) { avail, checking, status ->
-        UpdateUiBundle(avail, checking, status)
+    private val _updateBundleFlow = combine(
+        _availableUpdate,
+        _latestDetectedUpdate,
+        _isCheckingUpdate,
+        _updateStatusText
+    ) { avail, latest, checking, status ->
+        UpdateUiBundle(avail, latest, checking, status)
     }
 
     private val _events = MutableSharedFlow<UiEvent>()
@@ -304,6 +312,7 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
             engineers = engineersList,
             webPortalStatus = webStatus,
             availableUpdate = updateBundle.availableUpdate,
+            latestDetectedUpdate = updateBundle.latestDetectedUpdate,
             isCheckingUpdate = updateBundle.isCheckingUpdate,
             updateStatusText = updateBundle.updateStatusText,
             isBusy = busy
@@ -349,9 +358,12 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
         if (_isCheckingUpdate.value) return
         viewModelScope.launch {
             _isCheckingUpdate.value = true
+            val settings = prefs.getSnapshot()
             val outcome = AppUpdateChecker.checkLatestRelease(
                 currentVersionName = BuildConfig.VERSION_NAME,
-                currentVersionCode = BuildConfig.VERSION_CODE
+                currentVersionCode = BuildConfig.VERSION_CODE,
+                githubRepo = settings.githubRepo,
+                githubToken = settings.githubToken
             )
             _isCheckingUpdate.value = false
             val now = System.currentTimeMillis()
@@ -359,15 +371,23 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
             if (info != null) {
                 prefs.recordUpdateCheck(now, info.latestTag)
                 if (info.isUpdateAvailable) {
+                    _latestDetectedUpdate.value = info
                     _availableUpdate.value = info
-                    _updateStatusText.value = "Update available: ${info.latestTag} (installed v${BuildConfig.VERSION_NAME})"
+                    val apkNote = if (info.apkDownloadUrl != null) "APK ready" else "Open Release page"
+                    _updateStatusText.value = "Update available: ${info.latestTag} (installed v${BuildConfig.VERSION_NAME}, Build ${BuildConfig.VERSION_CODE}) — $apkNote"
                 } else {
-                    _updateStatusText.value = outcome.errorMessage ?: "Up to date (v${BuildConfig.VERSION_NAME})"
+                    _latestDetectedUpdate.value = null
+                    val msg = outcome.errorMessage ?: run {
+                        val apkNote = if (info.apkDownloadUrl != null) ".apk attached" else "no .apk attached"
+                        "Up to date — installed v${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE}) • GitHub latest: ${info.latestTag} ($apkNote)"
+                    }
+                    _updateStatusText.value = msg
                     if (manual) {
-                        _events.emit(UiEvent.Snackbar(outcome.errorMessage ?: "MachinaLog v${BuildConfig.VERSION_NAME} is up to date"))
+                        _events.emit(UiEvent.Snackbar(msg))
                     }
                 }
             } else {
+                _latestDetectedUpdate.value = null
                 val err = outcome.errorMessage ?: "Unable to check updates right now."
                 _updateStatusText.value = err
                 if (manual) {
@@ -377,6 +397,10 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun openLatestUpdateDialog() {
+        _latestDetectedUpdate.value?.let { _availableUpdate.value = it }
+    }
+
     fun dismissUpdateDialog() {
         _availableUpdate.value = null
     }
@@ -384,6 +408,14 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
     fun setAutoCheckUpdates(enabled: Boolean) {
         viewModelScope.launch {
             prefs.setAutoCheckUpdates(enabled)
+        }
+    }
+
+    fun setGithubUpdateConfig(repo: String, token: String) {
+        viewModelScope.launch {
+            prefs.setGithubRepo(repo)
+            prefs.setGithubToken(token)
+            checkForUpdates(manual = true)
         }
     }
 

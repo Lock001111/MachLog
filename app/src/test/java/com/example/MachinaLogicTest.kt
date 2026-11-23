@@ -914,5 +914,13 @@ class MachinaLogicTest {
         assertEquals(listOf(press), filterMachinesByQuery(machines, "hydraulic"))
         assertEquals(machines, filterMachinesByQuery(machines, "   "))
     }
+
+    @Test
+    fun `normalizeRepoSlug cleans github URLs and falls back cleanly`() {
+        assertEquals("Lock001111/MachLog", AppUpdateChecker.normalizeRepoSlug("Lock001111/MachLog"))
+        assertEquals("Lock001111/MachLog", AppUpdateChecker.normalizeRepoSlug("https://github.com/Lock001111/MachLog/"))
+        assertEquals("Lock001111/MachLog", AppUpdateChecker.normalizeRepoSlug("https://github.com/Lock001111/MachLog.git"))
+        assertEquals("Lock001111/MachLog", AppUpdateChecker.normalizeRepoSlug("invalid"))
+    }
 }
 

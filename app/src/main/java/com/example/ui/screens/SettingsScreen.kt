@@ -17,18 +17,24 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.TableView
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -37,17 +43,25 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.BuildConfig
 import com.example.data.AutoBackupFrequency
@@ -82,6 +96,8 @@ fun SettingsScreen(
     onOpenPcWebPortal: () -> Unit,
     onSetAutoCheckUpdates: (Boolean) -> Unit,
     onCheckForUpdates: () -> Unit,
+    onOpenDetectedUpdate: () -> Unit,
+    onSaveGithubConfig: (String, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -396,8 +412,13 @@ fun SettingsScreen(
 
         // 6. GitHub App Updates
         item(key = "settings_updates") {
+            var showRepoConfig by remember { mutableStateOf(false) }
+            var repoDraft by remember(state.preferences.githubRepo) { mutableStateOf(state.preferences.githubRepo) }
+            var tokenDraft by remember(state.preferences.githubToken) { mutableStateOf(state.preferences.githubToken) }
+            var showToken by remember { mutableStateOf(false) }
+
             SettingsSectionCard(
-                title = "App Updates (GitHub: ${AppUpdateChecker.GITHUB_REPO})",
+                title = "App Updates (GitHub: ${state.preferences.githubRepo})",
                 subtitle = "Installed: v${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})"
             ) {
                 Row(
@@ -430,16 +451,35 @@ fun SettingsScreen(
                     Spacer(Modifier.width(6.dp))
                     Text(if (state.isCheckingUpdate) "Checking GitHub Releases..." else "Check for Updates Now")
                 }
+                state.latestDetectedUpdate?.let { detected ->
+                    Button(
+                        onClick = onOpenDetectedUpdate,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .minimumInteractiveComponentSize()
+                            .testTag("open_detected_update_button")
+                    ) {
+                        Icon(Icons.Filled.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Update Available: ${detected.latestTag} — Download APK")
+                    }
+                }
                 state.updateStatusText?.let { statusLine ->
+                    val isWarning = statusLine.contains("404", ignoreCase = true) ||
+                        statusLine.contains("401", ignoreCase = true) ||
+                        statusLine.contains("403", ignoreCase = true) ||
+                        statusLine.contains("Offline", ignoreCase = true) ||
+                        statusLine.contains("0 published", ignoreCase = true)
                     Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                        color = if (isWarning) sem.warningContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
                         shape = RoundedCornerShape(8.dp),
+                        border = if (isWarning) BorderStroke(1.dp, sem.warning.copy(alpha = 0.55f)) else null,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
                             text = statusLine,
                             style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = if (isWarning) sem.warning else MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(10.dp)
                         )
                     }
@@ -450,6 +490,95 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+                TextButton(
+                    onClick = { showRepoConfig = !showRepoConfig },
+                    modifier = Modifier
+                        .minimumInteractiveComponentSize()
+                        .testTag("toggle_github_repo_config")
+                ) {
+                    Icon(
+                        imageVector = if (showRepoConfig) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        if (state.preferences.githubToken.isNotBlank()) {
+                            "Repository & Private Token (Configured)"
+                        } else {
+                            "Repository & Private Repo Token (Optional)"
+                        }
+                    )
+                }
+                if (showRepoConfig) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Note: Private GitHub repos return HTTP 404 unless a read-only GitHub Token is added below (or change the repo visibility to Public on GitHub).",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        OutlinedTextField(
+                            value = repoDraft,
+                            onValueChange = { repoDraft = it },
+                            label = { Text("GitHub Repository (owner/repo)") },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("github_repo_input")
+                        )
+                        OutlinedTextField(
+                            value = tokenDraft,
+                            onValueChange = { tokenDraft = it },
+                            label = { Text("GitHub Access Token (optional, for private repo)") },
+                            placeholder = { Text("github_pat_...") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { showToken = !showToken }) {
+                                    Icon(
+                                        imageVector = if (showToken) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                        contentDescription = "Toggle token visibility"
+                                    )
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("github_token_input")
+                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    repoDraft = AppUpdateChecker.GITHUB_REPO
+                                    tokenDraft = ""
+                                    onSaveGithubConfig(AppUpdateChecker.GITHUB_REPO, "")
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .minimumInteractiveComponentSize()
+                            ) {
+                                Text("Reset Default")
+                            }
+                            Button(
+                                onClick = { onSaveGithubConfig(repoDraft, tokenDraft) },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .minimumInteractiveComponentSize()
+                                    .testTag("save_github_config_button")
+                            ) {
+                                Icon(Icons.Filled.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Save & Check")
+                            }
+                        }
+                    }
                 }
             }
         }
