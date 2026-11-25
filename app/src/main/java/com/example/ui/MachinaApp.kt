@@ -24,6 +24,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddTask
 import androidx.compose.material.icons.filled.Assessment
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Engineering
 import androidx.compose.material.icons.filled.Inventory2
@@ -85,16 +86,20 @@ import com.example.R
 import com.example.data.EngineerEntity
 import com.example.data.MachineEntity
 import com.example.data.MaintenanceTaskEntity
+import com.example.data.SupplierEntity
 import com.example.data.TodoReminderEntity
 import com.example.data.WarehousePartEntity
 import com.example.engine.ExportFilterParams
 import com.example.engine.Formatters
 import com.example.engine.NotificationChannels
+import com.example.ui.components.DeadlineCalendarDialog
 import com.example.ui.screens.EngineerEditorDialog
 import com.example.ui.screens.EngineersScreen
 import com.example.ui.screens.MachinesScreen
 import com.example.ui.screens.ReportsScreen
 import com.example.ui.screens.SettingsScreen
+import com.example.ui.screens.SupplierEditorDialog
+import com.example.ui.screens.SuppliersScreen
 import com.example.ui.screens.TasksScreen
 import com.example.ui.screens.WarehousePartsScreen
 import com.example.ui.sheets.AppUpdateAvailableDialog
@@ -114,6 +119,7 @@ import kotlinx.coroutines.launch
 const val ROUTE_TASKS = "tasks"
 const val ROUTE_MACHINES = "machines"
 const val ROUTE_WAREHOUSE = "warehouse"
+const val ROUTE_SUPPLIERS = "suppliers"
 const val ROUTE_ENGINEERS = "engineers"
 const val ROUTE_REPORTS = "reports"
 const val ROUTE_SETTINGS = "settings"
@@ -149,6 +155,7 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
     var showTaskEditor by remember { mutableStateOf(false) }
     var editingTask by remember { mutableStateOf<MaintenanceTaskEntity?>(null) }
     var taskDefaultMachineId by remember { mutableStateOf<Long?>(null) }
+    var taskDefaultDeadlineMillis by remember { mutableStateOf<Long?>(null) }
 
     var completingTask by remember { mutableStateOf<MaintenanceTaskEntity?>(null) }
     var rejectingTask by remember { mutableStateOf<MaintenanceTaskEntity?>(null) }
@@ -160,9 +167,13 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
 
     var showTodoEditor by remember { mutableStateOf(false) }
     var editingTodo by remember { mutableStateOf<TodoReminderEntity?>(null) }
+    var todoDefaultDueAtMillis by remember { mutableStateOf<Long?>(null) }
 
     var showWarehousePartEditor by remember { mutableStateOf(false) }
     var editingWarehousePart by remember { mutableStateOf<WarehousePartEntity?>(null) }
+
+    var showSupplierEditor by remember { mutableStateOf(false) }
+    var editingSupplier by remember { mutableStateOf<SupplierEntity?>(null) }
 
     var showEngineerEditor by remember { mutableStateOf(false) }
     var editingEngineer by remember { mutableStateOf<EngineerEntity?>(null) }
@@ -171,6 +182,7 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
     var exportPreferPdf by remember { mutableStateOf(false) }
     var pendingExportParams by remember { mutableStateOf(ExportFilterParams()) }
 
+    var showDeadlineCalendar by remember { mutableStateOf(false) }
     var showPcWebDialog by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
@@ -294,7 +306,7 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                         titleContentColor = MaterialTheme.colorScheme.onSurface
                     ),
                     navigationIcon = {
-                        if (currentRoute == ROUTE_SETTINGS) {
+                        if (currentRoute == ROUTE_SETTINGS || currentRoute == ROUTE_SUPPLIERS) {
                             IconButton(
                                 onClick = { navController.popBackStack() },
                                 modifier = Modifier.testTag("topbar_back_button")
@@ -308,7 +320,11 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                     },
                     title = {
                         Text(
-                            text = if (currentRoute == ROUTE_SETTINGS) "Settings" else stringResource(R.string.app_name),
+                            text = when (currentRoute) {
+                                ROUTE_SETTINGS -> "Settings"
+                                ROUTE_SUPPLIERS -> "Suppliers"
+                                else -> stringResource(R.string.app_name)
+                            },
                             style = MaterialTheme.typography.titleLarge
                         )
                     },
@@ -329,28 +345,30 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                                 .minimumInteractiveComponentSize()
                                 .testTag("topbar_pc_web_button")
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.size(40.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Filled.Computer,
                                     contentDescription = if (pcOnline) "Disable PC Web Access" else "Enable PC Web Access",
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(Modifier.width(5.dp))
-                                Text(
-                                    text = if (pcOnline) "PC ON" else "PC OFF",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    softWrap = false
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
                         IconButton(
+                            onClick = { showDeadlineCalendar = true },
+                            modifier = Modifier.testTag("topbar_calendar_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.CalendarMonth,
+                                contentDescription = stringResource(R.string.action_open_calendar)
+                            )
+                        }
+                        IconButton(
                             onClick = {
                                 editingTask = null
+                                taskDefaultDeadlineMillis = null
                                 taskDefaultMachineId = state.selectedMachineId ?: state.machines.firstOrNull()?.id
                                 showTaskEditor = true
                             },
@@ -385,7 +403,7 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                 )
             },
             bottomBar = {
-                if (!useNavRail && currentRoute != ROUTE_SETTINGS) {
+                if (!useNavRail && currentRoute != ROUTE_SETTINGS && currentRoute != ROUTE_SUPPLIERS) {
                     NavigationBar {
                         TopDestinations.forEach { dest ->
                             val selected = currentRoute == dest.route
@@ -432,6 +450,7 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                             ExtendedFloatingActionButton(
                                 onClick = {
                                     editingTodo = null
+                                    todoDefaultDueAtMillis = null
                                     showTodoEditor = true
                                 },
                                 icon = { Icon(Icons.Filled.Add, contentDescription = null) },
@@ -442,6 +461,7 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                             ExtendedFloatingActionButton(
                                 onClick = {
                                     editingTask = null
+                                    taskDefaultDeadlineMillis = null
                                     taskDefaultMachineId = state.machines.firstOrNull()?.id
                                     showTaskEditor = true
                                 },
@@ -468,6 +488,15 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                         icon = { Icon(Icons.Filled.Add, contentDescription = null) },
                         text = { Text(stringResource(R.string.action_add_warehouse_part)) },
                         modifier = Modifier.testTag("fab_add_warehouse_part")
+                    )
+                    ROUTE_SUPPLIERS -> ExtendedFloatingActionButton(
+                        onClick = {
+                            editingSupplier = null
+                            showSupplierEditor = true
+                        },
+                        icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                        text = { Text(stringResource(R.string.action_add_supplier)) },
+                        modifier = Modifier.testTag("fab_add_supplier")
                     )
                     ROUTE_ENGINEERS -> ExtendedFloatingActionButton(
                         onClick = {
@@ -546,11 +575,13 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                                 onUpdateFilter = viewModel::updateTasksFilter,
                                 onAddTask = {
                                     editingTask = null
+                                    taskDefaultDeadlineMillis = null
                                     taskDefaultMachineId = state.machines.firstOrNull()?.id
                                     showTaskEditor = true
                                 },
                                 onEditTask = { task ->
                                     editingTask = task
+                                    taskDefaultDeadlineMillis = null
                                     taskDefaultMachineId = task.machineId
                                     showTaskEditor = true
                                 },
@@ -571,10 +602,12 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                                 onToggleTodoComplete = viewModel::toggleTodoComplete,
                                 onAddTodo = {
                                     editingTodo = null
+                                    todoDefaultDueAtMillis = null
                                     showTodoEditor = true
                                 },
                                 onEditTodo = { todo ->
                                     editingTodo = todo
+                                    todoDefaultDueAtMillis = null
                                     showTodoEditor = true
                                 },
                                 onDeleteTodo = { todo -> viewModel.deleteTodo(todo.id) },
@@ -601,6 +634,7 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                                 onUpdateMachineStatus = viewModel::updateMachineStatus,
                                 onAddTaskForMachine = { machineId ->
                                     editingTask = null
+                                    taskDefaultDeadlineMillis = null
                                     taskDefaultMachineId = machineId
                                     showTaskEditor = true
                                 },
@@ -639,6 +673,32 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
                                             "*/*"
                                         )
                                     )
+                                },
+                                onOpenSuppliersMenu = { supId ->
+                                    if (supId != null) viewModel.selectSupplier(supId)
+                                    navController.navigate(ROUTE_SUPPLIERS) {
+                                        launchSingleTop = true
+                                    }
+                                }
+                            )
+                        }
+                        composable(ROUTE_SUPPLIERS) {
+                            SuppliersScreen(
+                                state = state,
+                                onSelectSupplier = viewModel::selectSupplier,
+                                onSetListPageSize = viewModel::setListPageSize,
+                                onAddSupplier = {
+                                    editingSupplier = null
+                                    showSupplierEditor = true
+                                },
+                                onEditSupplier = { sup ->
+                                    editingSupplier = sup
+                                    showSupplierEditor = true
+                                },
+                                onDeleteSupplier = { sup -> viewModel.deleteSupplier(sup.id) },
+                                onEditPart = { part ->
+                                    editingWarehousePart = part
+                                    showWarehousePartEditor = true
                                 }
                             )
                         }
@@ -742,6 +802,50 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
     }
 
     // --- Dialogs & Sheets ---
+    if (showDeadlineCalendar) {
+        DeadlineCalendarDialog(
+            tasks = state.tasks,
+            todos = state.todos,
+            machines = state.machines,
+            onDismiss = { showDeadlineCalendar = false },
+            onEditTask = { task ->
+                showDeadlineCalendar = false
+                editingTask = task
+                taskDefaultDeadlineMillis = null
+                taskDefaultMachineId = task.machineId
+                showTaskEditor = true
+            },
+            onCompleteTask = { task ->
+                showDeadlineCalendar = false
+                completingTask = task
+            },
+            onRejectTask = { task ->
+                showDeadlineCalendar = false
+                rejectingTask = task
+            },
+            onEditTodo = { todo ->
+                showDeadlineCalendar = false
+                editingTodo = todo
+                todoDefaultDueAtMillis = null
+                showTodoEditor = true
+            },
+            onToggleTodoComplete = viewModel::toggleTodoComplete,
+            onAddTaskForDate = { dayMillis ->
+                showDeadlineCalendar = false
+                editingTask = null
+                taskDefaultDeadlineMillis = dayMillis
+                taskDefaultMachineId = state.selectedMachineId ?: state.machines.firstOrNull()?.id
+                showTaskEditor = true
+            },
+            onAddTodoForDate = { dayMillis ->
+                showDeadlineCalendar = false
+                editingTodo = null
+                todoDefaultDueAtMillis = dayMillis
+                showTodoEditor = true
+            }
+        )
+    }
+
     if (showTaskEditor) {
         TaskEditorDialog(
             initialTask = editingTask,
@@ -750,6 +854,7 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
             machines = state.machines,
             groups = state.groups,
             engineers = state.engineers,
+            defaultDeadlineMillis = taskDefaultDeadlineMillis,
             onDismiss = { showTaskEditor = false },
             onDelete = { taskId ->
                 viewModel.deleteTask(taskId)
@@ -805,10 +910,44 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
     if (showWarehousePartEditor) {
         WarehousePartEditorDialog(
             initialPart = editingWarehousePart,
+            suppliers = state.suppliers,
             onDismiss = { showWarehousePartEditor = false },
-            onSave = { id, uuid, partCode, partName, partDescription, defaultUnit ->
-                viewModel.saveWarehousePart(id, uuid, partCode, partName, partDescription, defaultUnit)
+            onSave = { id, uuid, partCode, partName, partDescription, defaultUnit, supplierId, supplierPartSku, unitPrice, currency, leadTimeDays ->
+                viewModel.saveWarehousePart(
+                    id = id,
+                    uuid = uuid,
+                    partCode = partCode,
+                    partName = partName,
+                    partDescription = partDescription,
+                    defaultUnit = defaultUnit,
+                    supplierId = supplierId,
+                    supplierPartSku = supplierPartSku,
+                    unitPrice = unitPrice,
+                    currency = currency,
+                    leadTimeDays = leadTimeDays
+                )
                 showWarehousePartEditor = false
+            }
+        )
+    }
+
+    if (showSupplierEditor) {
+        SupplierEditorDialog(
+            initialSupplier = editingSupplier,
+            onDismiss = { showSupplierEditor = false },
+            onSave = { id, uuid, companyName, supplierCode, contactPerson, phone, email, address, notes ->
+                viewModel.saveSupplier(
+                    id = id,
+                    uuid = uuid,
+                    companyName = companyName,
+                    supplierCode = supplierCode,
+                    contactPerson = contactPerson,
+                    phone = phone,
+                    email = email,
+                    address = address,
+                    notes = notes
+                )
+                showSupplierEditor = false
             }
         )
     }
@@ -841,6 +980,7 @@ fun MachinaApp(viewModel: MachinaViewModel = viewModel()) {
             machines = state.machines,
             groups = state.groups,
             engineers = state.engineers,
+            defaultDueAtMillis = todoDefaultDueAtMillis,
             onDismiss = { showTodoEditor = false },
             onSave = { id, uuid, title, notes, machineId, groupId, pic, rule, dueAt, remOn, priority, isDone, doneAt ->
                 viewModel.saveTodo(id, uuid, title, notes, machineId, groupId, pic, rule, dueAt, remOn, priority, isDone, doneAt)

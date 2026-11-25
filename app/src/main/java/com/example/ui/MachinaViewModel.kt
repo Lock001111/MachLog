@@ -22,6 +22,7 @@ import com.example.data.RepeatRule
 import com.example.data.ServiceLogWithParts
 import com.example.data.Severity
 import com.example.data.SparePartDraft
+import com.example.data.SupplierEntity
 import com.example.data.TaskOutcome
 import com.example.data.TodoReminderEntity
 import com.example.data.UserPreferences
@@ -164,6 +165,12 @@ private data class FilterUiBundle(
     val report: ExportFilterParams
 )
 
+private data class CatalogUiBundle(
+    val warehouseParts: List<WarehousePartEntity>,
+    val suppliers: List<SupplierEntity>,
+    val selectedSupplierId: Long?
+)
+
 data class MachinaUiState(
     val groups: List<CustomGroupEntity> = emptyList(),
     val machines: List<MachineEntity> = emptyList(),
@@ -181,6 +188,8 @@ data class MachinaUiState(
     val pendingImportPreview: PortableBackupPackage? = null,
     val pendingExcelImportPreview: ExcelImportPreview? = null,
     val warehouseParts: List<WarehousePartEntity> = emptyList(),
+    val suppliers: List<SupplierEntity> = emptyList(),
+    val selectedSupplierId: Long? = null,
     val engineers: List<EngineerEntity> = emptyList(),
     val webPortalStatus: WebPortalStatus = WebPortalStatus(),
     val availableUpdate: AppUpdateInfo? = null,
@@ -223,6 +232,14 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
         FilterUiBundle(tasks, todo, history, machine, report)
     }
     private val _selectedMachineId = MutableStateFlow<Long?>(null)
+    private val _selectedSupplierId = MutableStateFlow<Long?>(null)
+    private val _catalogBundleFlow = combine(
+        repo.warehousePartsFlow,
+        repo.suppliersFlow,
+        _selectedSupplierId
+    ) { parts, sups, selSup ->
+        CatalogUiBundle(parts, sups, selSup)
+    }
     private val _localBackups = MutableStateFlow<List<File>>(emptyList())
     private val _pendingImportPreview = MutableStateFlow<PortableBackupPackage?>(null)
     private val _pendingExcelImportPreview = MutableStateFlow<ExcelImportPreview?>(null)
@@ -256,7 +273,7 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
         _pendingImportPreview,
         _pendingExcelImportPreview,
         _isBusy,
-        repo.warehousePartsFlow,
+        _catalogBundleFlow,
         LocalWebServerManager.status,
         repo.engineersFlow,
         _updateBundleFlow
@@ -279,8 +296,7 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
         val importPreview = values[9] as PortableBackupPackage?
         val excelPreview = values[10] as ExcelImportPreview?
         val busy = values[11] as Boolean
-        @Suppress("UNCHECKED_CAST")
-        val warehouseCatalog = values[12] as List<WarehousePartEntity>
+        val catalogBundle = values[12] as CatalogUiBundle
         val webStatus = values[13] as WebPortalStatus
         @Suppress("UNCHECKED_CAST")
         val engineersList = values[14] as List<EngineerEntity>
@@ -290,6 +306,13 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
             selMachine
         } else {
             machines.firstOrNull()?.id
+        }
+        val resolvedSelectedSupplierId = if (catalogBundle.selectedSupplierId != null &&
+            catalogBundle.suppliers.any { it.id == catalogBundle.selectedSupplierId }
+        ) {
+            catalogBundle.selectedSupplierId
+        } else {
+            catalogBundle.suppliers.firstOrNull()?.id
         }
 
         MachinaUiState(
@@ -308,7 +331,9 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
             localBackups = backups,
             pendingImportPreview = importPreview,
             pendingExcelImportPreview = excelPreview,
-            warehouseParts = warehouseCatalog,
+            warehouseParts = catalogBundle.warehouseParts,
+            suppliers = catalogBundle.suppliers,
+            selectedSupplierId = resolvedSelectedSupplierId,
             engineers = engineersList,
             webPortalStatus = webStatus,
             availableUpdate = updateBundle.availableUpdate,
@@ -464,6 +489,10 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
 
     fun selectMachine(machineId: Long?) {
         _selectedMachineId.value = machineId
+    }
+
+    fun selectSupplier(supplierId: Long?) {
+        _selectedSupplierId.value = supplierId
     }
 
     // --- Custom Group CRUD ---
@@ -736,7 +765,12 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
         partCode: String,
         partName: String,
         partDescription: String,
-        defaultUnit: String
+        defaultUnit: String,
+        supplierId: Long? = null,
+        supplierPartSku: String = "",
+        unitPrice: Double? = null,
+        currency: String = "USD",
+        leadTimeDays: Int? = null
     ) {
         viewModelScope.launch {
             val entity = if (id == 0L || uuid == null) {
@@ -744,7 +778,12 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
                     partCode = partCode.trim().uppercase(),
                     partName = partName.trim(),
                     partDescription = partDescription.trim(),
-                    defaultUnit = defaultUnit.trim().ifEmpty { "pcs" }
+                    defaultUnit = defaultUnit.trim().ifEmpty { "pcs" },
+                    supplierId = supplierId,
+                    supplierPartSku = supplierPartSku.trim(),
+                    unitPrice = unitPrice,
+                    currency = currency.trim().uppercase().ifEmpty { "USD" },
+                    leadTimeDays = leadTimeDays
                 )
             } else {
                 WarehousePartEntity(
@@ -753,7 +792,12 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
                     partCode = partCode.trim().uppercase(),
                     partName = partName.trim(),
                     partDescription = partDescription.trim(),
-                    defaultUnit = defaultUnit.trim().ifEmpty { "pcs" }
+                    defaultUnit = defaultUnit.trim().ifEmpty { "pcs" },
+                    supplierId = supplierId,
+                    supplierPartSku = supplierPartSku.trim(),
+                    unitPrice = unitPrice,
+                    currency = currency.trim().uppercase().ifEmpty { "USD" },
+                    leadTimeDays = leadTimeDays
                 )
             }
             repo.saveWarehousePart(entity)
@@ -765,6 +809,60 @@ class MachinaViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             repo.deleteWarehousePart(partId)
             _events.emit(UiEvent.Snackbar("Spare part removed from warehouse list"))
+        }
+    }
+
+    // --- Suppliers Directory ---
+    fun saveSupplier(
+        id: Long,
+        uuid: String?,
+        companyName: String,
+        supplierCode: String,
+        contactPerson: String,
+        phone: String,
+        email: String,
+        address: String,
+        notes: String
+    ) {
+        viewModelScope.launch {
+            val cleanName = companyName.trim()
+            if (cleanName.isEmpty()) return@launch
+            val entity = if (id == 0L || uuid == null) {
+                SupplierEntity(
+                    companyName = cleanName,
+                    supplierCode = supplierCode.trim().uppercase(),
+                    contactPerson = contactPerson.trim(),
+                    phone = phone.trim(),
+                    email = email.trim(),
+                    address = address.trim(),
+                    notes = notes.trim()
+                )
+            } else {
+                SupplierEntity(
+                    id = id,
+                    uuid = uuid,
+                    companyName = cleanName,
+                    supplierCode = supplierCode.trim().uppercase(),
+                    contactPerson = contactPerson.trim(),
+                    phone = phone.trim(),
+                    email = email.trim(),
+                    address = address.trim(),
+                    notes = notes.trim()
+                )
+            }
+            val savedId = repo.saveSupplier(entity)
+            _selectedSupplierId.value = savedId
+            _events.emit(UiEvent.Snackbar("Supplier \"$cleanName\" saved"))
+        }
+    }
+
+    fun deleteSupplier(supplierId: Long) {
+        viewModelScope.launch {
+            repo.deleteSupplier(supplierId)
+            if (_selectedSupplierId.value == supplierId) {
+                _selectedSupplierId.value = null
+            }
+            _events.emit(UiEvent.Snackbar("Supplier removed"))
         }
     }
 

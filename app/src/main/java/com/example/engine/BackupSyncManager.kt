@@ -20,6 +20,7 @@ import com.example.data.ServiceEntryType
 import com.example.data.ServiceLogEntity
 import com.example.data.Severity
 import com.example.data.SparePartUsedEntity
+import com.example.data.SupplierEntity
 import com.example.data.TaskOutcome
 import com.example.data.TodoReminderEntity
 import com.example.data.WarehousePartEntity
@@ -129,12 +130,30 @@ data class ServiceLogBackupDto(
 )
 
 @JsonClass(generateAdapter = true)
+data class SupplierBackupDto(
+    val uuid: String,
+    val companyName: String,
+    val supplierCode: String = "",
+    val contactPerson: String = "",
+    val phone: String = "",
+    val email: String = "",
+    val address: String = "",
+    val notes: String = "",
+    val updatedAtMillis: Long
+)
+
+@JsonClass(generateAdapter = true)
 data class WarehousePartBackupDto(
     val uuid: String,
     val partCode: String,
     val partName: String = "",
     val partDescription: String = "",
     val defaultUnit: String = "pcs",
+    val supplierUuid: String? = null,
+    val supplierPartSku: String = "",
+    val unitPrice: Double? = null,
+    val currency: String = "USD",
+    val leadTimeDays: Int? = null,
     val updatedAtMillis: Long
 )
 
@@ -150,7 +169,7 @@ data class EngineerBackupDto(
 
 @JsonClass(generateAdapter = true)
 data class PortableBackupPackage(
-    val schemaVersion: Int = 2,
+    val schemaVersion: Int = 3,
     val exportedAtMillis: Long,
     val deviceLabel: String,
     val groups: List<GroupBackupDto>,
@@ -159,7 +178,8 @@ data class PortableBackupPackage(
     val todos: List<TodoBackupDto>,
     val serviceLogs: List<ServiceLogBackupDto>,
     val warehouseParts: List<WarehousePartBackupDto> = emptyList(),
-    val engineers: List<EngineerBackupDto> = emptyList()
+    val engineers: List<EngineerBackupDto> = emptyList(),
+    val suppliers: List<SupplierBackupDto> = emptyList()
 )
 
 object BackupSyncManager {
@@ -177,14 +197,16 @@ object BackupSyncManager {
         val todos = dao.getAllTodosSync()
         val logsWithParts = dao.getAllServiceLogsWithPartsSync()
         val warehouseParts = dao.getAllWarehousePartsSync()
+        val suppliers = dao.getAllSuppliersSync()
         val engineers = dao.getAllEngineersSync()
 
         val groupUuidById = groups.associate { it.id to it.uuid }
         val machineUuidById = machines.associate { it.id to it.uuid }
         val taskUuidById = tasks.associate { it.id to it.uuid }
+        val supplierUuidById = suppliers.associate { it.id to it.uuid }
 
         return PortableBackupPackage(
-            schemaVersion = 2,
+            schemaVersion = 3,
             exportedAtMillis = System.currentTimeMillis(),
             deviceLabel = "${Build.MANUFACTURER} ${Build.MODEL}",
             groups = groups.map {
@@ -288,6 +310,11 @@ object BackupSyncManager {
                     partName = w.partName,
                     partDescription = w.partDescription,
                     defaultUnit = w.defaultUnit,
+                    supplierUuid = w.supplierId?.let { sid -> supplierUuidById[sid] },
+                    supplierPartSku = w.supplierPartSku,
+                    unitPrice = w.unitPrice,
+                    currency = w.currency,
+                    leadTimeDays = w.leadTimeDays,
                     updatedAtMillis = w.updatedAtMillis
                 )
             },
@@ -300,12 +327,29 @@ object BackupSyncManager {
                     shift = e.shift,
                     updatedAtMillis = e.updatedAtMillis
                 )
+            },
+            suppliers = suppliers.map { s ->
+                SupplierBackupDto(
+                    uuid = s.uuid,
+                    companyName = s.companyName,
+                    supplierCode = s.supplierCode,
+                    contactPerson = s.contactPerson,
+                    phone = s.phone,
+                    email = s.email,
+                    address = s.address,
+                    notes = s.notes,
+                    updatedAtMillis = s.updatedAtMillis
+                )
             }
         )
     }
 
+    fun encodeBackupJson(pkg: PortableBackupPackage): String {
+        return adapter.toJson(pkg)
+    }
+
     suspend fun exportJsonString(dao: MachinaDao): String {
-        return adapter.toJson(createBackupPackage(dao))
+        return encodeBackupJson(createBackupPackage(dao))
     }
 
     fun parseBackupJson(json: String): PortableBackupPackage? {
@@ -592,9 +636,47 @@ object BackupSyncManager {
             }
         }
 
+        val existingSuppliers = dao.getAllSuppliersSync().associateBy { it.uuid }.toMutableMap()
+        val supplierUuidToId = mutableMapOf<String, Long>()
+        existingSuppliers.values.forEach { supplierUuidToId[it.uuid] = it.id }
+
+        for (s in pkg.suppliers) {
+            val existing = existingSuppliers[s.uuid]
+            if (existing == null) {
+                val id = dao.insertSupplier(
+                    SupplierEntity(
+                        uuid = s.uuid,
+                        companyName = s.companyName.trim(),
+                        supplierCode = s.supplierCode.trim().uppercase(),
+                        contactPerson = s.contactPerson.trim(),
+                        phone = s.phone.trim(),
+                        email = s.email.trim(),
+                        address = s.address.trim(),
+                        notes = s.notes.trim(),
+                        updatedAtMillis = s.updatedAtMillis
+                    )
+                )
+                supplierUuidToId[s.uuid] = id
+            } else if (s.updatedAtMillis > existing.updatedAtMillis) {
+                dao.updateSupplier(
+                    existing.copy(
+                        companyName = s.companyName.trim(),
+                        supplierCode = s.supplierCode.trim().uppercase(),
+                        contactPerson = s.contactPerson.trim(),
+                        phone = s.phone.trim(),
+                        email = s.email.trim(),
+                        address = s.address.trim(),
+                        notes = s.notes.trim(),
+                        updatedAtMillis = s.updatedAtMillis
+                    )
+                )
+            }
+        }
+
         val existingWarehouse = dao.getAllWarehousePartsSync().associateBy { it.uuid }
         for (w in pkg.warehouseParts) {
             val existing = existingWarehouse[w.uuid]
+            val resolvedSupplierId = w.supplierUuid?.let { supplierUuidToId[it] }
             if (existing == null) {
                 dao.insertWarehousePart(
                     WarehousePartEntity(
@@ -603,6 +685,11 @@ object BackupSyncManager {
                         partName = w.partName.trim(),
                         partDescription = w.partDescription.trim(),
                         defaultUnit = w.defaultUnit.trim().ifEmpty { "pcs" },
+                        supplierId = resolvedSupplierId,
+                        supplierPartSku = w.supplierPartSku.trim(),
+                        unitPrice = w.unitPrice,
+                        currency = w.currency.trim().uppercase().ifEmpty { "USD" },
+                        leadTimeDays = w.leadTimeDays,
                         updatedAtMillis = w.updatedAtMillis
                     )
                 )
@@ -613,6 +700,11 @@ object BackupSyncManager {
                         partName = w.partName.trim(),
                         partDescription = w.partDescription.trim(),
                         defaultUnit = w.defaultUnit.trim().ifEmpty { "pcs" },
+                        supplierId = resolvedSupplierId,
+                        supplierPartSku = w.supplierPartSku.trim(),
+                        unitPrice = w.unitPrice,
+                        currency = w.currency.trim().uppercase().ifEmpty { "USD" },
+                        leadTimeDays = w.leadTimeDays,
                         updatedAtMillis = w.updatedAtMillis
                     )
                 )

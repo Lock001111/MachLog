@@ -286,10 +286,39 @@ data class ServiceLogWithParts(
 )
 
 @Entity(
-    tableName = "warehouse_parts",
+    tableName = "suppliers",
     indices = [
         Index(value = ["uuid"], unique = true),
-        Index(value = ["partCode"])
+        Index(value = ["companyName"])
+    ]
+)
+data class SupplierEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val uuid: String = UUID.randomUUID().toString(),
+    val companyName: String,
+    val supplierCode: String = "",
+    val contactPerson: String = "",
+    val phone: String = "",
+    val email: String = "",
+    val address: String = "",
+    val notes: String = "",
+    val updatedAtMillis: Long = System.currentTimeMillis()
+)
+
+@Entity(
+    tableName = "warehouse_parts",
+    foreignKeys = [
+        ForeignKey(
+            entity = SupplierEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["supplierId"],
+            onDelete = ForeignKey.SET_NULL
+        )
+    ],
+    indices = [
+        Index(value = ["uuid"], unique = true),
+        Index(value = ["partCode"]),
+        Index(value = ["supplierId"])
     ]
 )
 data class WarehousePartEntity(
@@ -299,6 +328,11 @@ data class WarehousePartEntity(
     val partName: String = "",
     val partDescription: String = "",
     val defaultUnit: String = "pcs",
+    val supplierId: Long? = null,
+    val supplierPartSku: String = "",
+    val unitPrice: Double? = null,
+    val currency: String = "USD",
+    val leadTimeDays: Int? = null,
     val updatedAtMillis: Long = System.currentTimeMillis()
 )
 

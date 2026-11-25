@@ -5,13 +5,16 @@
     <string name="nav_warehouse">Parts</string>
     <string name="nav_engineers">Engineers</string>
     <string name="nav_reports">Reports</string>
+    <string name="nav_suppliers">Suppliers</string>
     <string name="action_sync_backup">Settings</string>
+    <string name="action_open_calendar">Deadline Calendar</string>
     <string name="action_pc_web">PC Web Access</string>
     <string name="action_export_report">Export Report</string>
     <string name="action_add_task">New Task</string>
     <string name="action_add_machine">Add Machine</string>
     <string name="action_add_todo">New Reminder</string>
     <string name="action_add_warehouse_part">Add Part</string>
+    <string name="action_add_supplier">Add Supplier</string>
     <string name="action_add_engineer">Add Engineer</string>
     <string name="action_manage_groups">Manage Groups</string>
     <string name="notification_channel_reminders_name">Task &amp; To-Do Reminders</string>

@@ -276,6 +276,43 @@
       background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
       width: 100%; max-width: 680px; max-height: 90vh; display: flex; flex-direction: column; overflow: hidden;
     }
+    .modal.modal-lg { max-width: 1080px; }
+    .cal-layout {
+      display: grid; grid-template-columns: 1.35fr 1fr; gap: 14px; align-items: start;
+    }
+    @media (max-width: 860px) { .cal-layout { grid-template-columns: 1fr; } }
+    .cal-weekdays, .cal-grid {
+      display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px;
+    }
+    .cal-weekday {
+      text-align: center; font-size: 11px; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; padding: 4px 0;
+    }
+    .cal-cell {
+      min-height: 76px; border: 1px solid var(--border); border-radius: 9px;
+      background: var(--surface); padding: 6px; cursor: pointer;
+      display: flex; flex-direction: column; justify-content: space-between; gap: 4px;
+      transition: border-color .12s ease, background .12s ease;
+    }
+    .cal-cell:hover { background: var(--surface-alt); }
+    .cal-cell.blank { border-color: transparent; background: transparent; cursor: default; pointer-events: none; }
+    .cal-cell.today { border-color: var(--ok); }
+    .cal-cell.overdue { background: var(--danger-soft); border-color: rgba(185,28,28,0.45); }
+    .cal-cell.selected { background: var(--primary-soft); border: 2px solid var(--primary); }
+    .cal-day-num { font-size: 12px; font-weight: 700; display: flex; justify-content: space-between; align-items: center; }
+    .cal-tags { display: flex; flex-direction: column; gap: 2px; }
+    .cal-tag {
+      font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 5px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .cal-tag.task { background: var(--primary); color: var(--primary-fg); }
+    .cal-tag.task.late { background: var(--danger); color: #fff; }
+    .cal-tag.todo { background: var(--warn-soft); color: var(--warn); border: 1px solid rgba(180,83,9,0.28); }
+    .cal-detail-panel {
+      border: 1px solid var(--border); border-radius: 12px; padding: 12px;
+      background: var(--surface-alt); max-height: 62vh; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 8px;
+    }
     .modal-header { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
     .modal-body { padding: 16px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
     .modal-footer { padding: 12px 18px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
@@ -320,6 +357,7 @@
       <button class="nav-btn active" data-tab="tasks" onclick="switchTab('tasks')">Tasks &amp; To-Do <span class="pill" id="nav-badge-tasks">0</span></button>
       <button class="nav-btn" data-tab="machines" onclick="switchTab('machines')">Machines <span class="pill" id="nav-badge-machines">0</span></button>
       <button class="nav-btn" data-tab="warehouse" onclick="switchTab('warehouse')">Warehouse Parts <span class="pill" id="nav-badge-parts">0</span></button>
+      <button class="nav-btn" data-tab="suppliers" onclick="switchTab('suppliers')">Suppliers <span class="pill" id="nav-badge-suppliers">0</span></button>
       <button class="nav-btn" data-tab="engineers" onclick="switchTab('engineers')">Engineers <span class="pill" id="nav-badge-engineers">0</span></button>
       <button class="nav-btn" data-tab="reports" onclick="switchTab('reports')">Reports</button>
       <button class="nav-btn" data-tab="settings" onclick="switchTab('settings')">Settings</button>
@@ -337,6 +375,10 @@
         <span id="net-busy-pill" class="net-busy-pill"><span class="spinner"></span><span id="net-busy-text">Working...</span></span>
       </div>
       <div class="row">
+        <button class="btn" title="Open Deadline Calendar" onclick="openCalendarModal()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          Calendar
+        </button>
         <button class="btn-primary" title="Create New Maintenance Task" onclick="openTaskModal()">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
           New Task
@@ -410,10 +452,17 @@ const appState = {
   collapsedMachineGroups: {},
   machineSearch: '',
   selectedMachineId: null,
+  selectedSupplierId: null,
   partSearch: '',
+  supplierSearch: '',
   engineerSearch: '',
+  calendarYear: new Date().getFullYear(),
+  calendarMonth: new Date().getMonth(),
+  calendarSelectedDayKey: null,
+  calendarFilter: 'ALL',
+  calendarShowDoneTodos: false,
   pageSize: 25,
-  pages: { tasks: 0, todos: 0, history: 0, machines: 0, machineLogs: 0, warehouse: 0, engineers: 0, reports: 0, engActive: 0, engHistory: 0 },
+  pages: { tasks: 0, todos: 0, history: 0, machines: 0, machineLogs: 0, warehouse: 0, suppliers: 0, engineers: 0, reports: 0, engActive: 0, engHistory: 0 },
   reportGroupBy: 'CUSTOM_GROUP',
   collapsedReportGroups: {},
   reportsTableCollapsed: false,
@@ -443,6 +492,7 @@ function iconSvg(name) {
     edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg>',
     del: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M10 11v6M14 11v6"/></svg>',
     history: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>',
+    supplier: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l1-5h16l1 5"/><path d="M3 9a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0"/><path d="M5 12v8h14v-8"/><path d="M9 20v-5h6v5"/></svg>',
     tasks: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
     plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
     upload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
@@ -714,9 +764,19 @@ function renderTopKpis() {
     ];
   } else if (appState.tab === 'warehouse') {
     const usageCount = d.serviceLogs.reduce((acc, l) => acc + ((l.parts || []).length), 0);
+    const linkedSuppliers = d.warehouseParts.filter(w => w.supplierId).length;
     cards = [
       { lbl: 'Warehouse Spare Parts', val: d.warehouseParts.length, color: 'var(--primary)' },
+      { lbl: 'Supplier-Linked Parts', val: linkedSuppliers, color: 'var(--ok)' },
       { lbl: 'Historical Part Uses', val: usageCount, color: '' }
+    ];
+  } else if (appState.tab === 'suppliers') {
+    const sups = d.suppliers || [];
+    const linked = d.warehouseParts.filter(w => w.supplierId).length;
+    cards = [
+      { lbl: 'Configured Suppliers', val: sups.length, color: 'var(--primary)' },
+      { lbl: 'Supplied Catalog Parts', val: linked, color: 'var(--ok)' },
+      { lbl: 'Unassigned Parts', val: Math.max(0, d.warehouseParts.length - linked), color: 'var(--warn)' }
     ];
   } else if (appState.tab === 'engineers') {
     const engs = d.engineers || [];
@@ -756,10 +816,13 @@ function updateKpis() {
   const now = Date.now();
   const urgentTaskCount = d.tasks.filter(t => isTaskApproachingOrOverdue(t, now)).length;
   const engineersCount = (d.engineers || []).length;
+  const suppliersCount = (d.suppliers || []).length;
 
   document.getElementById('nav-badge-tasks').textContent = urgentTaskCount;
   document.getElementById('nav-badge-machines').textContent = d.machines.length;
   document.getElementById('nav-badge-parts').textContent = d.warehouseParts.length;
+  const supBadge = document.getElementById('nav-badge-suppliers');
+  if (supBadge) supBadge.textContent = suppliersCount;
   document.getElementById('nav-badge-engineers').textContent = engineersCount;
   const verEl = document.getElementById('sidebar-version');
   if (verEl) {
@@ -775,6 +838,7 @@ function switchTab(tab) {
     tasks: 'Tasks, To-Dos & History',
     machines: 'Machines & History',
     warehouse: 'Warehouse Spare Parts Catalog',
+    suppliers: 'Spare Part Suppliers Directory',
     engineers: 'Maintenance Engineers',
     reports: 'Machine Maintenance Reports & Exports',
     settings: 'Settings, Import/Backup, Groups & Updates'
@@ -963,6 +1027,7 @@ function renderTab() {
   if (appState.tab === 'tasks') renderTasks(root, d);
   else if (appState.tab === 'machines') renderMachines(root, d);
   else if (appState.tab === 'warehouse') renderWarehouse(root, d);
+  else if (appState.tab === 'suppliers') renderSuppliers(root, d);
   else if (appState.tab === 'engineers') renderEngineers(root, d);
   else if (appState.tab === 'reports') renderReports(root, d);
   else if (appState.tab === 'settings') renderSettings(root, d);
@@ -1675,7 +1740,7 @@ function filterMachinePickerList(prefix, allowNone = false, onSelectCallbackJs =
   el.innerHTML = html;
 }
 
-function openTaskModal(id = null, defaultMachineIdArg = null) {
+function openTaskModal(id = null, defaultMachineIdArg = null, defaultDeadlineMsArg = null) {
   const d = appState.data;
   const t = id ? d.tasks.find(x => x.id === id) : null;
   const engineers = d.engineers || [];
@@ -1720,7 +1785,7 @@ function openTaskModal(id = null, defaultMachineIdArg = null) {
         <select id="t-priority">${['NORMAL','HIGH','URGENT'].map(p => `<option value="${p}" ${selectedPriority===p?'selected':''}>${p}</option>`).join('')}</select>
       </div>
     </div>
-    <div><label>Deadline</label><input id="t-deadline" type="datetime-local" value="${toInputDateTime(t?.deadlineMillis || (Date.now() + 8*3600*1000))}" /></div>
+    <div><label>Deadline</label><input id="t-deadline" type="datetime-local" value="${toInputDateTime(t?.deadlineMillis || defaultDeadlineMsArg || (Date.now() + 8*3600*1000))}" /></div>
     <div style="border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--surface-alt);">
       <div class="between" style="margin-bottom:6px;">
         <strong>Deadline Reminder</strong>
@@ -1971,7 +2036,7 @@ async function submitRejectTask(taskId, btnEl) {
   }, btnEl);
 }
 
-function openTodoModal(id = null) {
+function openTodoModal(id = null, defaultDueMsArg = null) {
   const d = appState.data;
   const td = id ? d.todos.find(x => x.id === id) : null;
   const engineers = d.engineers || [];
@@ -1985,7 +2050,7 @@ function openTodoModal(id = null) {
       <div><label>Priority</label><select id="td-prio">${['NORMAL','HIGH','URGENT'].map(p => `<option ${td?.priority===p?'selected':''}>${p}</option>`).join('')}</select></div>
     </div>
     <div class="grid-2">
-      <div><label>Trigger Date &amp; Time</label><input id="td-due" type="datetime-local" value="${toInputDateTime(td?.dueAtMillis || (Date.now()+4*3600*1000))}" /></div>
+      <div><label>Trigger Date &amp; Time</label><input id="td-due" type="datetime-local" value="${toInputDateTime(td?.dueAtMillis || defaultDueMsArg || (Date.now()+4*3600*1000))}" /></div>
       <div><label>PIC (Registered Only) *</label>${buildEngineerSelectHtml('td-pic', engineers, activePic)}</div>
     </div>
     <div><label>Linked Machine (Optional — Search by ID or description)</label>${renderMachinePickerBlock('td', d.machines, td?.machineId || '', true, '')}</div>
@@ -2245,17 +2310,34 @@ async function deleteMachine(id, btnEl) {
 }
 
 // --- 3. WAREHOUSE SPARE PARTS ---
+function fmtCurrencyPriceWeb(price, currency = 'USD') {
+  if (price === null || price === undefined || Number.isNaN(Number(price))) return '-';
+  const cur = String(currency || 'USD').trim().toUpperCase() || 'USD';
+  const symbols = { USD: '$', EUR: '€', GBP: '£', JPY: '¥', IDR: 'Rp ', SGD: 'S$', MYR: 'RM ' };
+  const sym = symbols[cur] || (cur + ' ');
+  const dec = (cur === 'JPY' || cur === 'IDR') ? 0 : 2;
+  return sym + Number(price).toFixed(dec);
+}
+
 function renderWarehouse(root, d) {
+  const supMap = byIdMap(d.suppliers || []);
   const tokens = appState.partSearch.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const wSort = appState.colSorts.warehouse || { key: 'partCode', dir: 'ASC' };
   const filtered = d.warehouseParts.filter(w => {
     if (!tokens.length) return true;
-    const hay = `${w.partCode} ${w.partName} ${w.partDescription}`.toLowerCase();
+    const sup = w.supplierId ? supMap[w.supplierId] : null;
+    const hay = `${w.partCode} ${w.partName} ${w.partDescription} ${w.supplierPartSku || ''} ${sup?.companyName || ''}`.toLowerCase();
     return tokens.every(t => hay.includes(t));
   }).sort((a, b) => {
     switch (wSort.key) {
       case 'partName': return cmpValues(a.partName || '', b.partName || '', wSort.dir);
       case 'partDescription': return cmpValues(a.partDescription || '', b.partDescription || '', wSort.dir);
+      case 'supplier': {
+        const sa = a.supplierId && supMap[a.supplierId] ? supMap[a.supplierId].companyName : '';
+        const sb = b.supplierId && supMap[b.supplierId] ? supMap[b.supplierId].companyName : '';
+        return cmpValues(sa, sb, wSort.dir);
+      }
+      case 'unitPrice': return cmpValues(Number(a.unitPrice ?? -1), Number(b.unitPrice ?? -1), wSort.dir);
       case 'defaultUnit': return cmpValues(a.defaultUnit || '', b.defaultUnit || '', wSort.dir);
       case 'partCode':
       default: return cmpValues(a.partCode || '', b.partCode || '', wSort.dir);
@@ -2267,15 +2349,16 @@ function renderWarehouse(root, d) {
       <div class="between" style="margin-bottom:10px;">
         <div>
           <strong>Warehouse Spare Parts Catalog (${filtered.length} / ${d.warehouseParts.length})</strong>
-          <div class="muted">Codes &amp; descriptions master list (with machine usage history)</div>
+          <div class="muted">Codes, descriptions, supplier pricing &amp; usage history</div>
         </div>
         <div class="row">
+          <button class="btn btn-std" title="Configure Suppliers" onclick="switchTab('suppliers')">${iconSvg('supplier')} Suppliers (${(d.suppliers || []).length})</button>
           <button class="btn btn-std" title="Import Excel (.xlsx)" onclick="triggerQuickExcelImport()">${iconSvg('upload')} Import Excel</button>
           <button class="btn-primary btn-std" title="Add Warehouse Spare Part" onclick="openWarehouseModal()">${iconSvg('plus')} Add Part</button>
         </div>
       </div>
       <div class="filter-bar" style="grid-template-columns:1fr;">
-        <input placeholder="Search by Part Code / ID or Description..." value="${esc(appState.partSearch)}" oninput="appState.partSearch=this.value; appState.pages.warehouse=0; renderTab()" />
+        <input placeholder="Search by Part Code / ID, description, SKU, or supplier..." value="${esc(appState.partSearch)}" oninput="appState.partSearch=this.value; appState.pages.warehouse=0; renderTab()" />
       </div>
       <table>
         <thead>
@@ -2283,29 +2366,103 @@ function renderWarehouse(root, d) {
             ${sortableTh('warehouse', 'partCode', 'Part ID / Code')}
             ${sortableTh('warehouse', 'partName', 'Part Name')}
             ${sortableTh('warehouse', 'partDescription', 'Description')}
-            ${sortableTh('warehouse', 'defaultUnit', 'Default Unit')}
+            ${sortableTh('warehouse', 'supplier', 'Supplier')}
+            ${sortableTh('warehouse', 'unitPrice', 'Unit Price')}
+            ${sortableTh('warehouse', 'defaultUnit', 'Unit')}
             <th>Actions</th>
           </tr>
         </thead>
         <tbody>
-          ${filtered.length === 0 ? `<tr><td colspan="5" class="muted">No matching spare parts.</td></tr>` :
-            paged.items.map(w => `<tr>
-              <td><span class="pill pill-primary">${esc(w.partCode)}</span></td>
+          ${filtered.length === 0 ? `<tr><td colspan="7" class="muted">No matching spare parts.</td></tr>` :
+            paged.items.map(w => {
+              const sup = w.supplierId ? supMap[w.supplierId] : null;
+              return `<tr>
+              <td><span class="pill pill-primary">${esc(w.partCode)}</span>${w.supplierPartSku ? `<div class="muted" style="margin-top:3px;">SKU: ${esc(w.supplierPartSku)}</div>` : ''}</td>
               <td><strong>${esc(w.partName || '-')}</strong></td>
               <td>${esc(w.partDescription)}</td>
+              <td>${sup ? `<button class="pill-btn info" onclick="openPartSupplierModal(${w.id})">${iconSvg('supplier')} <span>${esc(sup.companyName)}</span></button>` : `<span class="muted">Not linked</span>`}</td>
+              <td><strong>${esc(fmtCurrencyPriceWeb(w.unitPrice, w.currency))}</strong>${w.leadTimeDays ? `<div class="muted">${w.leadTimeDays}d lead</div>` : ''}</td>
               <td><span class="pill">${esc(w.defaultUnit)}</span></td>
               <td>
                 <div class="row" style="gap:5px;flex-wrap:nowrap;">
+                  <button class="icon-btn" title="Supplier Details" aria-label="Supplier Details" onclick="openPartSupplierModal(${w.id})">${iconSvg('supplier')}</button>
                   <button class="icon-btn" title="Machine Usage History" aria-label="Part Usage History" onclick="openPartHistoryModal(${w.id})">${iconSvg('history')}</button>
                   <button class="icon-btn" title="Edit Part" aria-label="Edit Part" onclick="openWarehouseModal(${w.id})">${iconSvg('edit')}</button>
                   <button class="icon-btn danger" title="Delete Part" aria-label="Delete Part" onclick="deleteWarehousePart(${w.id}, this)">${iconSvg('del')}</button>
                 </div>
               </td>
-            </tr>`).join('')}
+            </tr>`;
+            }).join('')}
         </tbody>
       </table>
       ${paginationBarHtml(paged, 'warehouse')}
     </div>`;
+}
+
+function openPartSupplierModal(partId) {
+  const d = appState.data;
+  const part = (d.warehouseParts || []).find(w => w.id === partId);
+  if (!part) return;
+  const sup = part.supplierId ? (d.suppliers || []).find(s => s.id === part.supplierId) : null;
+  const otherParts = sup ? (d.warehouseParts || []).filter(w => w.supplierId === sup.id) : [];
+
+  const priceBlock = `
+    <div style="border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--surface-alt);">
+      <div class="between">
+        <strong>${esc(part.partCode)} · ${esc(part.partName || part.partDescription)}</strong>
+        <span class="pill pill-primary">${esc(fmtCurrencyPriceWeb(part.unitPrice, part.currency))} / ${esc(part.defaultUnit)}</span>
+      </div>
+      <div class="muted" style="margin-top:4px;">
+        ${part.supplierPartSku ? `Supplier SKU: <strong>${esc(part.supplierPartSku)}</strong>` : 'No supplier SKU set'}
+        ${part.leadTimeDays ? ` · Lead Time: <strong>${part.leadTimeDays} day(s)</strong>` : ''}
+      </div>
+    </div>`;
+
+  const supBlock = !sup
+    ? `<div class="card" style="margin:0;border-color:var(--warn);">
+        <strong>No supplier assigned to this spare part yet.</strong>
+        <div class="muted" style="margin-top:4px;">Click Edit Part to link a supplier and unit price, or manage suppliers in the Suppliers menu.</div>
+       </div>`
+    : `<div class="card" style="margin:0;">
+        <div class="between">
+          <h3 style="margin:0;font-size:16px;">${esc(sup.companyName)}</h3>
+          ${sup.supplierCode ? `<span class="pill pill-primary">${esc(sup.supplierCode)}</span>` : ''}
+        </div>
+        <div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;">
+          <div><span class="muted">Contact Person</span><div><strong>${esc(sup.contactPerson || '-')}</strong></div></div>
+          <div><span class="muted">Phone</span><div><strong>${esc(sup.phone || '-')}</strong></div></div>
+          <div><span class="muted">Email</span><div><strong>${esc(sup.email || '-')}</strong></div></div>
+          <div><span class="muted">Address</span><div><strong>${esc(sup.address || '-')}</strong></div></div>
+        </div>
+        ${sup.notes ? `<div class="muted" style="margin-top:8px;">Notes: ${esc(sup.notes)}</div>` : ''}
+      </div>
+      <div>
+        <strong>All Parts Supplied by ${esc(sup.companyName)} (${otherParts.length})</strong>
+        <table style="margin-top:6px;">
+          <thead><tr><th>Part Code</th><th>Name</th><th>SKU</th><th>Price</th></tr></thead>
+          <tbody>
+            ${otherParts.map(op => `<tr>
+              <td><span class="pill pill-primary">${esc(op.partCode)}</span></td>
+              <td>${esc(op.partName || op.partDescription)}</td>
+              <td>${esc(op.supplierPartSku || '-')}</td>
+              <td><strong>${esc(fmtCurrencyPriceWeb(op.unitPrice, op.currency))}</strong> / ${esc(op.defaultUnit)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+
+  openModal(
+    `${part.partCode} — Supplier Details`,
+    priceBlock + supBlock,
+    `<button class="btn" onclick="closeModal(); openWarehouseModal(${part.id})">Edit Part</button>
+     <button class="btn-primary" onclick="focusSupplierInTab(${sup ? sup.id : 'null'})">Open in Suppliers Menu</button>`
+  );
+}
+
+function focusSupplierInTab(supplierId) {
+  closeModal();
+  if (supplierId) appState.selectedSupplierId = supplierId;
+  switchTab('suppliers');
 }
 
 function openPartHistoryModal(partId) {
@@ -2350,14 +2507,31 @@ function openPartHistoryModal(partId) {
 }
 
 function openWarehouseModal(id = null) {
-  const w = id ? appState.data.warehouseParts.find(x => x.id === id) : null;
+  const d = appState.data;
+  const w = id ? d.warehouseParts.find(x => x.id === id) : null;
+  const suppliers = d.suppliers || [];
   openModal(w ? 'Edit Warehouse Spare Part' : 'Add Warehouse Spare Part', `
     <div class="grid-2">
       <div><label>Spare Part ID / Code *</label><input id="wp-code" value="${esc(w?.partCode || '')}" placeholder="e.g. BRG-6205-2RS" /></div>
       <div><label>Default Unit</label><input id="wp-unit" value="${esc(w?.defaultUnit || 'pcs')}" /></div>
     </div>
     <div><label>Part Name (optional)</label><input id="wp-name" value="${esc(w?.partName || '')}" /></div>
-    <div><label>Spare Part Description *</label><textarea id="wp-desc" rows="3">${esc(w?.partDescription || '')}</textarea></div>
+    <div><label>Spare Part Description *</label><textarea id="wp-desc" rows="2">${esc(w?.partDescription || '')}</textarea></div>
+    <div>
+      <label>Supplier</label>
+      <select id="wp-supplier">
+        <option value="">None Assigned</option>
+        ${suppliers.map(s => `<option value="${s.id}" ${w?.supplierId===s.id?'selected':''}>${esc((s.supplierCode ? '[' + s.supplierCode + '] ' : '') + s.companyName)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="grid-2">
+      <div><label>Unit Price</label><input id="wp-price" type="number" step="0.01" min="0" value="${w?.unitPrice ?? ''}" placeholder="e.g. 24.50" /></div>
+      <div><label>Currency</label><input id="wp-currency" value="${esc(w?.currency || 'USD')}" placeholder="USD" /></div>
+    </div>
+    <div class="grid-2">
+      <div><label>Supplier Part SKU</label><input id="wp-sku" value="${esc(w?.supplierPartSku || '')}" placeholder="e.g. SKF-6205-2RS1" /></div>
+      <div><label>Lead Time (days)</label><input id="wp-lead" type="number" min="0" value="${w?.leadTimeDays ?? ''}" placeholder="e.g. 3" /></div>
+    </div>
   `, `<button class="btn-primary" onclick="saveWarehousePart(${w ? w.id : 0}, this)">Save Part</button>`);
 }
 
@@ -2366,10 +2540,21 @@ async function saveWarehousePart(id, btnEl) {
   const partDescription = document.getElementById('wp-desc').value.trim();
   const partName = document.getElementById('wp-name').value.trim();
   if (!partCode || (!partDescription && !partName)) return showToast('Part Code and Description are required');
+  const supVal = document.getElementById('wp-supplier').value;
+  const priceRaw = document.getElementById('wp-price').value.trim();
+  const leadRaw = document.getElementById('wp-lead').value.trim();
   await withBusy('Saving part...', async () => {
     await apiJson('/api/warehouse', 'POST', {
-      id, partCode, partName, partDescription: partDescription || partName,
-      defaultUnit: document.getElementById('wp-unit').value.trim() || 'pcs'
+      id,
+      partCode,
+      partName,
+      partDescription: partDescription || partName,
+      defaultUnit: document.getElementById('wp-unit').value.trim() || 'pcs',
+      supplierId: supVal ? Number(supVal) : null,
+      supplierPartSku: document.getElementById('wp-sku').value.trim(),
+      unitPrice: priceRaw !== '' ? Number(priceRaw) : null,
+      currency: (document.getElementById('wp-currency').value.trim() || 'USD').toUpperCase(),
+      leadTimeDays: leadRaw !== '' ? Number(leadRaw) : null
     });
     closeModal();
     showToast('Warehouse part saved');
@@ -2381,6 +2566,153 @@ async function deleteWarehousePart(id, btnEl) {
   if (!confirm('Remove this spare part from catalog?')) return;
   await withBusy('Deleting...', async () => {
     await apiJson(`/api/warehouse/${id}`, 'DELETE');
+    await refreshState(true);
+  }, btnEl);
+}
+
+// --- 3B. SUPPLIERS DIRECTORY ---
+function renderSuppliers(root, d) {
+  const suppliers = d.suppliers || [];
+  const partsBySup = {};
+  (d.warehouseParts || []).forEach(w => {
+    if (w.supplierId) {
+      if (!partsBySup[w.supplierId]) partsBySup[w.supplierId] = [];
+      partsBySup[w.supplierId].push(w);
+    }
+  });
+  const tokens = appState.supplierSearch.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const filtered = suppliers.filter(s => {
+    if (!tokens.length) return true;
+    const suppliedText = (partsBySup[s.id] || []).map(p => `${p.partCode} ${p.partName} ${p.supplierPartSku}`).join(' ');
+    const hay = `${s.companyName} ${s.supplierCode} ${s.contactPerson} ${s.phone} ${s.email} ${s.address} ${suppliedText}`.toLowerCase();
+    return tokens.every(t => hay.includes(t));
+  });
+  const paged = paginateWeb(filtered, 'suppliers');
+  const sel = suppliers.find(s => s.id === appState.selectedSupplierId) || paged.items[0] || filtered[0];
+  const selParts = sel ? (partsBySup[sel.id] || []) : [];
+
+  root.innerHTML = `
+    <div class="grid-split">
+      <div class="card">
+        <div class="between" style="margin-bottom:10px;">
+          <strong>Suppliers (${filtered.length})</strong>
+          <button class="btn-primary btn-std" title="Add Supplier" onclick="openSupplierModal()">${iconSvg('plus')} Add Supplier</button>
+        </div>
+        <div style="margin-bottom:10px;">
+          <input placeholder="Search company, contact person, or part code..." value="${esc(appState.supplierSearch)}" oninput="appState.supplierSearch=this.value; appState.pages.suppliers=0; renderTab()" />
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          ${paged.items.map(s => {
+            const count = (partsBySup[s.id] || []).length;
+            return `<div onclick="appState.selectedSupplierId=${s.id}; renderTab()" style="cursor:pointer;padding:10px;border-radius:10px;border:1px solid ${sel?.id===s.id?'var(--primary)':'var(--border)'};background:${sel?.id===s.id?'var(--primary-soft)':'var(--surface)'};">
+              <div class="between">
+                <strong>${esc(s.companyName)}</strong>
+                <span class="pill pill-ok">${count} part${count===1?'':'s'}</span>
+              </div>
+              <div class="muted" style="margin-top:3px;">
+                ${s.supplierCode ? `<span class="pill">${esc(s.supplierCode)}</span> ` : ''}
+                ${esc(s.contactPerson || 'No contact')} ${s.phone ? '· ' + esc(s.phone) : ''}
+              </div>
+            </div>`;
+          }).join('') || `<div class="muted">No suppliers configured.</div>`}
+        </div>
+        ${paginationBarHtml(paged, 'suppliers')}
+      </div>
+
+      <div class="card">
+        ${!sel ? `<div class="muted">Select or add a supplier to inspect contact details and all supplied spare parts.</div>` : `
+          <div class="between">
+            <div>
+              ${sel.supplierCode ? `<span class="pill pill-primary">${esc(sel.supplierCode)}</span>` : ''}
+              <h2 style="margin:6px 0 2px;font-size:18px;">${esc(sel.companyName)}</h2>
+              <div class="muted">${esc(sel.contactPerson || 'No contact person listed')} ${sel.phone ? '· ' + esc(sel.phone) : ''} ${sel.email ? '· ' + esc(sel.email) : ''}</div>
+              ${sel.address ? `<div class="muted" style="margin-top:3px;">Address: ${esc(sel.address)}</div>` : ''}
+              ${sel.notes ? `<p style="font-size:13px;margin:8px 0 0;">${esc(sel.notes)}</p>` : ''}
+            </div>
+            <div class="row">
+              <button class="icon-btn" title="Edit Supplier" aria-label="Edit Supplier" onclick="openSupplierModal(${sel.id})">${iconSvg('edit')}</button>
+              <button class="icon-btn danger" title="Delete Supplier" aria-label="Delete Supplier" onclick="deleteSupplier(${sel.id}, this)">${iconSvg('del')}</button>
+            </div>
+          </div>
+          <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;" />
+          <div class="between" style="margin-bottom:8px;">
+            <strong>Spare Parts Supplied (${selParts.length})</strong>
+            <button class="btn-sm" onclick="switchTab('warehouse')">View All Parts</button>
+          </div>
+          ${selParts.length === 0 ? `<div class="muted">No warehouse spare parts are currently linked to this supplier. Edit a spare part in Warehouse Parts to assign it here.</div>` : `
+            <table>
+              <thead>
+                <tr>
+                  <th>Part Code</th>
+                  <th>Part Name &amp; Description</th>
+                  <th>Supplier SKU</th>
+                  <th>Unit Price</th>
+                  <th>Lead Time</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${selParts.map(p => `<tr>
+                  <td><span class="pill pill-primary">${esc(p.partCode)}</span></td>
+                  <td><strong>${esc(p.partName || '-')}</strong><div class="muted">${esc(p.partDescription)}</div></td>
+                  <td>${esc(p.supplierPartSku || '-')}</td>
+                  <td><strong>${esc(fmtCurrencyPriceWeb(p.unitPrice, p.currency))}</strong> <span class="muted">/ ${esc(p.defaultUnit)}</span></td>
+                  <td>${p.leadTimeDays ? `${p.leadTimeDays} day(s)` : '-'}</td>
+                  <td>
+                    <button class="icon-btn" title="Edit Part" onclick="openWarehouseModal(${p.id})">${iconSvg('edit')}</button>
+                  </td>
+                </tr>`).join('')}
+              </tbody>
+            </table>
+          `}
+        `}
+      </div>
+    </div>`;
+}
+
+function openSupplierModal(id = null) {
+  const s = id ? (appState.data.suppliers || []).find(x => x.id === id) : null;
+  openModal(s ? 'Edit Supplier' : 'Add Supplier', `
+    <div class="grid-2">
+      <div><label>Company Name *</label><input id="sup-name" value="${esc(s?.companyName || '')}" placeholder="e.g. Apex Industrial Supply Co." /></div>
+      <div><label>Supplier Code</label><input id="sup-code" value="${esc(s?.supplierCode || '')}" placeholder="e.g. SUP-APX" /></div>
+    </div>
+    <div class="grid-2">
+      <div><label>Contact Person</label><input id="sup-contact" value="${esc(s?.contactPerson || '')}" /></div>
+      <div><label>Phone</label><input id="sup-phone" value="${esc(s?.phone || '')}" /></div>
+    </div>
+    <div><label>Email</label><input id="sup-email" value="${esc(s?.email || '')}" /></div>
+    <div><label>Address</label><textarea id="sup-address" rows="2">${esc(s?.address || '')}</textarea></div>
+    <div><label>Notes / Terms</label><textarea id="sup-notes" rows="2">${esc(s?.notes || '')}</textarea></div>
+  `, `<button class="btn-primary" onclick="saveSupplier(${s ? s.id : 0}, this)">Save Supplier</button>`);
+}
+
+async function saveSupplier(id, btnEl) {
+  const companyName = document.getElementById('sup-name').value.trim();
+  if (!companyName) return showToast('Company Name is required');
+  await withBusy('Saving supplier...', async () => {
+    await apiJson('/api/suppliers', 'POST', {
+      id,
+      companyName,
+      supplierCode: document.getElementById('sup-code').value.trim().toUpperCase(),
+      contactPerson: document.getElementById('sup-contact').value.trim(),
+      phone: document.getElementById('sup-phone').value.trim(),
+      email: document.getElementById('sup-email').value.trim(),
+      address: document.getElementById('sup-address').value.trim(),
+      notes: document.getElementById('sup-notes').value.trim()
+    });
+    closeModal();
+    showToast('Supplier saved');
+    await refreshState(true);
+  }, btnEl);
+}
+
+async function deleteSupplier(id, btnEl) {
+  if (!confirm('Remove this supplier? Linked spare parts will stay in your catalog.')) return;
+  await withBusy('Deleting supplier...', async () => {
+    await apiJson(`/api/suppliers/${id}`, 'DELETE');
+    if (appState.selectedSupplierId === id) appState.selectedSupplierId = null;
+    showToast('Supplier removed');
     await refreshState(true);
   }, btnEl);
 }
@@ -3061,7 +3393,181 @@ async function deleteGroup(id, btnEl) {
   }, btnEl);
 }
 
-function openModal(title, bodyHtml, footerHtml) {
+function toLocalDayKeyWeb(ms) {
+  const dt = new Date(ms);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+}
+
+function dayKeyToDefaultMillisWeb(key) {
+  const [y, m, d] = String(key).split('-').map(Number);
+  return new Date(y, (m || 1) - 1, d || 1, 9, 0, 0, 0).getTime();
+}
+
+function openCalendarModal(resetToday = false) {
+  const d = appState.data;
+  if (!d) return;
+  const now = Date.now();
+  const todayKey = toLocalDayKeyWeb(now);
+  if (resetToday || !appState.calendarSelectedDayKey) {
+    const dt = new Date(now);
+    appState.calendarYear = dt.getFullYear();
+    appState.calendarMonth = dt.getMonth();
+    appState.calendarSelectedDayKey = todayKey;
+  }
+
+  const dayMap = {};
+  const addToDay = (key, kind, item) => {
+    if (!dayMap[key]) dayMap[key] = { tasks: [], todos: [] };
+    dayMap[key][kind].push(item);
+  };
+  if (appState.calendarFilter === 'ALL' || appState.calendarFilter === 'TASKS') {
+    (d.tasks || []).slice().sort((a, b) => a.deadlineMillis - b.deadlineMillis).forEach(t => {
+      addToDay(toLocalDayKeyWeb(t.deadlineMillis), 'tasks', t);
+    });
+  }
+  if (appState.calendarFilter === 'ALL' || appState.calendarFilter === 'TODOS') {
+    (d.todos || []).filter(td => appState.calendarShowDoneTodos || !td.isCompleted)
+      .slice().sort((a, b) => a.dueAtMillis - b.dueAtMillis)
+      .forEach(td => addToDay(toLocalDayKeyWeb(td.dueAtMillis), 'todos', td));
+  }
+
+  const year = appState.calendarYear;
+  const month = appState.calendarMonth;
+  const firstDay = new Date(year, month, 1);
+  const leading = firstDay.getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const monthLabel = firstDay.toLocaleString([], { month: 'long', year: 'numeric' });
+  const mMap = byIdMap(d.machines);
+
+  let gridHtml = '';
+  for (let i = 0; i < leading; i++) gridHtml += `<div class="cal-cell blank"></div>`;
+  for (let day = 1; day <= daysInMonth; day++) {
+    const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const bucket = dayMap[key] || { tasks: [], todos: [] };
+    const isSel = appState.calendarSelectedDayKey === key;
+    const isToday = key === todayKey;
+    const hasOverdue = bucket.tasks.some(t => t.deadlineMillis < now) || bucket.todos.some(td => !td.isCompleted && td.dueAtMillis < now);
+    const previewTags = [
+      ...bucket.tasks.slice(0, 2).map(t => `<span class="cal-tag task ${t.deadlineMillis < now ? 'late' : ''}">${esc(t.title)}</span>`),
+      ...bucket.todos.slice(0, Math.max(0, 3 - Math.min(2, bucket.tasks.length))).map(td => `<span class="cal-tag todo">${esc(td.title)}</span>`)
+    ];
+    const total = bucket.tasks.length + bucket.todos.length;
+    const overflow = total > previewTags.length ? `<span class="muted" style="font-size:10px;">+${total - previewTags.length} more</span>` : '';
+
+    gridHtml += `
+      <div class="cal-cell ${isSel ? 'selected' : ''} ${isToday ? 'today' : ''} ${hasOverdue ? 'overdue' : ''}" onclick="appState.calendarSelectedDayKey='${key}'; openCalendarModal(false)">
+        <div class="cal-day-num">
+          <span>${day}</span>
+          ${total > 0 ? `<span class="pill ${hasOverdue ? 'pill-danger' : 'pill-primary'}" style="font-size:10px;padding:1px 5px;">${total}</span>` : ''}
+        </div>
+        <div class="cal-tags">${previewTags.join('')}${overflow}</div>
+      </div>`;
+  }
+
+  const selKey = appState.calendarSelectedDayKey || todayKey;
+  const selBucket = dayMap[selKey] || { tasks: [], todos: [] };
+  const selMillis = dayKeyToDefaultMillisWeb(selKey);
+  const selDateHeading = new Date(selMillis).toLocaleDateString([], { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+
+  const detailHtml = (selBucket.tasks.length === 0 && selBucket.todos.length === 0)
+    ? `<div class="muted">No maintenance tasks or to-do reminders scheduled on ${esc(selDateHeading)}.</div>`
+    : [
+        ...selBucket.tasks.map(t => {
+          const m = mMap[t.machineId];
+          const late = t.deadlineMillis < now;
+          return `<div class="eng-modal-card ${late ? 'alert-card' : 'active-card'}">
+            <div class="between">
+              <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;">
+                <span class="pill pill-primary">TASK</span>
+                ${priorityPillHtml(t.priority)}
+                <span class="pill">${esc(t.cadence)}</span>
+              </div>
+              <span class="muted">${fmtDate(t.deadlineMillis)}</span>
+            </div>
+            <div style="font-weight:700;margin-top:4px;">${esc(t.title)}</div>
+            <div class="muted">${esc(m?.assetCode || '-')} · ${esc(m?.name || '')} · PIC: ${esc(t.personInCharge)}</div>
+            ${t.description ? `<div class="muted" style="margin-top:3px;">${esc(t.description)}</div>` : ''}
+            <div class="row" style="margin-top:8px;justify-content:flex-end;gap:6px;">
+              <button class="icon-btn" title="Edit Task" onclick="closeModal(); openTaskModal(${t.id})">${iconSvg('edit')}</button>
+              <button class="icon-btn danger" title="Reject Task" onclick="closeModal(); openRejectTaskModal(${t.id})">${iconSvg('reject')}</button>
+              <button class="icon-btn ok" title="Complete Task" onclick="closeModal(); openCompleteTaskModal(${t.id})">${iconSvg('complete')}</button>
+            </div>
+          </div>`;
+        }),
+        ...selBucket.todos.map(td => {
+          const m = td.machineId ? mMap[td.machineId] : null;
+          return `<div class="eng-modal-card" style="border:1.5px solid var(--warn);">
+            <div class="between">
+              <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;">
+                <span class="pill pill-warn">TO-DO</span>
+                ${priorityPillHtml(td.priority)}
+                <span class="pill">${esc(td.repeatRule)}</span>
+                ${td.isCompleted ? `<span class="pill pill-ok">DONE</span>` : ''}
+              </div>
+              <span class="muted">${fmtDate(td.dueAtMillis)}</span>
+            </div>
+            <div style="font-weight:700;margin-top:4px;">${esc(td.title)}</div>
+            <div class="muted">${m ? esc(m.assetCode) + ' · ' : ''}PIC: ${esc(td.personInCharge)}</div>
+            ${td.notes ? `<div class="muted" style="margin-top:3px;">${esc(td.notes)}</div>` : ''}
+            <div class="row" style="margin-top:8px;justify-content:flex-end;gap:6px;">
+              <button class="icon-btn" title="Edit Reminder" onclick="closeModal(); openTodoModal(${td.id})">${iconSvg('edit')}</button>
+              <button class="icon-btn ok" title="Toggle Done" onclick="toggleTodo(${td.id}, this).then(() => openCalendarModal(false))">${iconSvg('complete')}</button>
+            </div>
+          </div>`;
+        })
+      ].join('');
+
+  const bodyHtml = `
+    <div class="between">
+      <div class="row">
+        <button class="btn-sm" onclick="shiftCalendarMonth(-1)">&laquo; Prev</button>
+        <strong style="min-width:140px;text-align:center;">${esc(monthLabel)}</strong>
+        <button class="btn-sm" onclick="shiftCalendarMonth(1)">Next &raquo;</button>
+        <button class="btn-sm" onclick="openCalendarModal(true)">Today</button>
+      </div>
+      <div class="row">
+        ${['ALL','TASKS','TODOS'].map(f => `<button class="chip ${appState.calendarFilter===f?'active':''}" onclick="appState.calendarFilter='${f}'; openCalendarModal(false)">${f === 'ALL' ? 'All' : f === 'TASKS' ? 'Tasks' : 'To-Do'}</button>`).join('')}
+        <label class="filter-check"><input type="checkbox" ${appState.calendarShowDoneTodos ? 'checked' : ''} onchange="appState.calendarShowDoneTodos=this.checked; openCalendarModal(false)" /> Done To-Dos</label>
+      </div>
+    </div>
+    <div class="cal-layout">
+      <div>
+        <div class="cal-weekdays">
+          ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(w => `<div class="cal-weekday">${w}</div>`).join('')}
+        </div>
+        <div class="cal-grid">${gridHtml}</div>
+      </div>
+      <div class="cal-detail-panel">
+        <div class="between">
+          <div>
+            <strong>${esc(selDateHeading)}</strong>
+            <div class="muted">${selBucket.tasks.length} task(s) · ${selBucket.todos.length} reminder(s)</div>
+          </div>
+          <div class="row" style="gap:6px;">
+            <button class="btn-sm" onclick="closeModal(); openTodoModal(null, ${selMillis})">${iconSvg('plus')} Reminder</button>
+            <button class="btn-primary btn-sm" onclick="closeModal(); openTaskModal(null, null, ${selMillis})">${iconSvg('plus')} Task</button>
+          </div>
+        </div>
+        ${detailHtml}
+      </div>
+    </div>`;
+
+  openModal('Maintenance & Reminder Deadline Calendar', bodyHtml, '', true);
+}
+
+function shiftCalendarMonth(delta) {
+  let y = appState.calendarYear;
+  let m = appState.calendarMonth + delta;
+  if (m < 0) { m = 11; y -= 1; }
+  if (m > 11) { m = 0; y += 1; }
+  appState.calendarYear = y;
+  appState.calendarMonth = m;
+  openCalendarModal(false);
+}
+
+function openModal(title, bodyHtml, footerHtml, large = false) {
+  const modalBox = document.querySelector('#modal-backdrop .modal');
+  if (modalBox) modalBox.classList.toggle('modal-lg', Boolean(large));
   document.getElementById('modal-title').textContent = title;
   document.getElementById('modal-body').innerHTML = bodyHtml;
   document.getElementById('modal-footer').innerHTML = `<button onclick="closeModal()">Cancel</button>` + footerHtml;

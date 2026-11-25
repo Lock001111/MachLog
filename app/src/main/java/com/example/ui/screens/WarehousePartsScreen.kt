@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.TableView
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -56,6 +57,7 @@ import com.example.data.MachineEntity
 import com.example.data.ServiceLogEntity
 import com.example.data.ServiceLogWithParts
 import com.example.data.SparePartUsedEntity
+import com.example.data.SupplierEntity
 import com.example.data.WarehousePartEntity
 import com.example.engine.Formatters
 import com.example.ui.MachinaUiState
@@ -114,13 +116,16 @@ fun WarehousePartsScreen(
     onAddPart: () -> Unit,
     onEditPart: (WarehousePartEntity) -> Unit,
     onDeletePart: (WarehousePartEntity) -> Unit,
-    onImportExcel: () -> Unit
+    onImportExcel: () -> Unit,
+    onOpenSuppliersMenu: (Long?) -> Unit
 ) {
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var currentPage by rememberSaveable { mutableIntStateOf(0) }
     var pendingDelete by remember { mutableStateOf<WarehousePartEntity?>(null) }
     var historyTargetPart by remember { mutableStateOf<WarehousePartEntity?>(null) }
+    var supplierTargetPart by remember { mutableStateOf<WarehousePartEntity?>(null) }
     val machinesById = remember(state.machines) { state.machines.associateBy { it.id } }
+    val suppliersById = remember(state.suppliers) { state.suppliers.associateBy { it.id } }
     val pageSize = state.preferences.todoPageSize.let { if (it in listOf(25, 50, 100)) it else 25 }
 
     val filteredParts = remember(state.warehouseParts, searchQuery) {
@@ -172,7 +177,20 @@ fun WarehousePartsScreen(
                         )
                     }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                ) {
+                    OutlinedButton(
+                        onClick = { onOpenSuppliersMenu(null) },
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("warehouse_open_suppliers_button")
+                    ) {
+                        Icon(Icons.Filled.Storefront, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text("Suppliers (${state.suppliers.size})", maxLines = 1)
+                    }
                     OutlinedButton(
                         onClick = onImportExcel,
                         modifier = Modifier
@@ -181,7 +199,7 @@ fun WarehousePartsScreen(
                     ) {
                         Icon(Icons.Filled.TableView, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Import Excel")
+                        Text("Import Excel", maxLines = 1)
                     }
                     OutlinedButton(
                         onClick = onAddPart,
@@ -191,7 +209,7 @@ fun WarehousePartsScreen(
                     ) {
                         Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("New Part Code")
+                        Text("New Part Code", maxLines = 1)
                     }
                 }
             }
@@ -248,8 +266,11 @@ fun WarehousePartsScreen(
                 modifier = Modifier.fillMaxSize()
             ) {
                 items(pagedParts.items, key = { it.id }) { part ->
+                    val supplier = part.supplierId?.let { suppliersById[it] }
                     WarehousePartCard(
                         part = part,
+                        supplier = supplier,
+                        onSupplierDetails = { supplierTargetPart = part },
                         onHistory = { historyTargetPart = part },
                         onEdit = { onEditPart(part) },
                         onDelete = { pendingDelete = part }
@@ -275,6 +296,27 @@ fun WarehousePartsScreen(
                 }
             }
         }
+    }
+
+    supplierTargetPart?.let { target ->
+        val sup = target.supplierId?.let { suppliersById[it] }
+        val suppliedParts = remember(sup, state.warehouseParts) {
+            if (sup == null) emptyList() else state.warehouseParts.filter { it.supplierId == sup.id }
+        }
+        SupplierDetailsDialog(
+            part = target,
+            supplier = sup,
+            suppliedParts = suppliedParts,
+            onDismiss = { supplierTargetPart = null },
+            onEditPart = { p ->
+                supplierTargetPart = null
+                onEditPart(p)
+            },
+            onOpenInSuppliersMenu = { supId ->
+                supplierTargetPart = null
+                onOpenSuppliersMenu(supId)
+            }
+        )
     }
 
     historyTargetPart?.let { target ->
@@ -319,6 +361,8 @@ fun WarehousePartsScreen(
 @Composable
 private fun WarehousePartCard(
     part: WarehousePartEntity,
+    supplier: SupplierEntity?,
+    onSupplierDetails: () -> Unit,
     onHistory: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit
@@ -344,7 +388,8 @@ private fun WarehousePartCard(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.horizontalScroll(rememberScrollState())
                 ) {
                     StatusPill(
                         text = part.partCode,
@@ -356,6 +401,13 @@ private fun WarehousePartCard(
                         containerColor = MaterialTheme.colorScheme.surfaceVariant,
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    if (part.unitPrice != null) {
+                        StatusPill(
+                            text = Formatters.formatCurrencyPrice(part.unitPrice, part.currency),
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
                 }
                 if (part.partName.isNotBlank()) {
                     Text(
@@ -374,8 +426,27 @@ private fun WarehousePartCard(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+                Text(
+                    text = supplier?.let { "Supplier: ${it.companyName}" } ?: "Supplier: Not assigned",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (supplier != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(2.dp))
+            IconButton(
+                onClick = onSupplierDetails,
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .testTag("supplier_warehouse_part_${part.id}")
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Storefront,
+                    contentDescription = "Supplier details for ${part.partCode}",
+                    tint = MaterialTheme.colorScheme.tertiary
+                )
+            }
             IconButton(
                 onClick = onHistory,
                 modifier = Modifier

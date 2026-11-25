@@ -17,9 +17,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ServiceLogEntity::class,
         SparePartUsedEntity::class,
         WarehousePartEntity::class,
-        EngineerEntity::class
+        EngineerEntity::class,
+        SupplierEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -124,6 +125,36 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `suppliers` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `uuid` TEXT NOT NULL,
+                        `companyName` TEXT NOT NULL,
+                        `supplierCode` TEXT NOT NULL DEFAULT '',
+                        `contactPerson` TEXT NOT NULL DEFAULT '',
+                        `phone` TEXT NOT NULL DEFAULT '',
+                        `email` TEXT NOT NULL DEFAULT '',
+                        `address` TEXT NOT NULL DEFAULT '',
+                        `notes` TEXT NOT NULL DEFAULT '',
+                        `updatedAtMillis` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_suppliers_uuid` ON `suppliers` (`uuid`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_suppliers_companyName` ON `suppliers` (`companyName`)")
+
+                db.execSQL("ALTER TABLE `warehouse_parts` ADD COLUMN `supplierId` INTEGER REFERENCES `suppliers`(`id`) ON DELETE SET NULL")
+                db.execSQL("ALTER TABLE `warehouse_parts` ADD COLUMN `supplierPartSku` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `warehouse_parts` ADD COLUMN `unitPrice` REAL")
+                db.execSQL("ALTER TABLE `warehouse_parts` ADD COLUMN `currency` TEXT NOT NULL DEFAULT 'USD'")
+                db.execSQL("ALTER TABLE `warehouse_parts` ADD COLUMN `leadTimeDays` INTEGER")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_warehouse_parts_supplierId` ON `warehouse_parts` (`supplierId`)")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -131,7 +162,14 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "machinalog.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(
+                        MIGRATION_1_2,
+                        MIGRATION_2_3,
+                        MIGRATION_3_4,
+                        MIGRATION_4_5,
+                        MIGRATION_5_6,
+                        MIGRATION_6_7
+                    )
                     .build()
                     .also { INSTANCE = it }
             }

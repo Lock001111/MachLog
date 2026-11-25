@@ -17,6 +17,7 @@ import com.example.data.RepeatRule
 import com.example.data.ServiceEntryType
 import com.example.data.Severity
 import com.example.data.SparePartDraft
+import com.example.data.SupplierEntity
 import com.example.data.TaskOutcome
 import com.example.data.TodoReminderEntity
 import com.example.data.WarehousePartEntity
@@ -348,6 +349,7 @@ object LocalWebServerManager {
                     val tasks = dao.getAllTasksSync()
                     val todos = dao.getAllTodosSync()
                     val warehouse = dao.getAllWarehousePartsSync()
+                    val suppliers = dao.getAllSuppliersSync()
                     val engineers = dao.getAllEngineersSync()
                     val logs = dao.getAllServiceLogsWithPartsSync()
 
@@ -373,7 +375,32 @@ object LocalWebServerManager {
                                 WebTodoDto(it.id, it.uuid, it.title, it.notes, it.machineId, it.groupId, it.personInCharge, it.repeatRule.name, it.dueAtMillis, it.reminderEnabled, it.isCompleted, it.priority.name, it.completedAtMillis, it.createdAtMillis)
                             },
                             warehouseParts = warehouse.map {
-                                WebWarehousePartDto(it.id, it.uuid, it.partCode, it.partName, it.partDescription, it.defaultUnit)
+                                WebWarehousePartDto(
+                                    id = it.id,
+                                    uuid = it.uuid,
+                                    partCode = it.partCode,
+                                    partName = it.partName,
+                                    partDescription = it.partDescription,
+                                    defaultUnit = it.defaultUnit,
+                                    supplierId = it.supplierId,
+                                    supplierPartSku = it.supplierPartSku,
+                                    unitPrice = it.unitPrice,
+                                    currency = it.currency,
+                                    leadTimeDays = it.leadTimeDays
+                                )
+                            },
+                            suppliers = suppliers.map {
+                                WebSupplierDto(
+                                    id = it.id,
+                                    uuid = it.uuid,
+                                    companyName = it.companyName,
+                                    supplierCode = it.supplierCode,
+                                    contactPerson = it.contactPerson,
+                                    phone = it.phone,
+                                    email = it.email,
+                                    address = it.address,
+                                    notes = it.notes
+                                )
                             },
                             engineers = engineers.map {
                                 WebEngineerDto(it.id, it.uuid, it.name, it.employeeCode, it.role, it.shift)
@@ -617,7 +644,12 @@ object LocalWebServerManager {
                             partCode = body.partCode.trim().uppercase(),
                             partName = body.partName.trim(),
                             partDescription = body.partDescription.trim(),
-                            defaultUnit = body.defaultUnit.trim().ifEmpty { "pcs" }
+                            defaultUnit = body.defaultUnit.trim().ifEmpty { "pcs" },
+                            supplierId = body.supplierId,
+                            supplierPartSku = body.supplierPartSku.trim(),
+                            unitPrice = body.unitPrice,
+                            currency = body.currency.trim().uppercase().ifEmpty { "USD" },
+                            leadTimeDays = body.leadTimeDays
                         )
                     )
                     jsonResponse(200, "OK", WebActionResult(true, "Warehouse spare part saved"))
@@ -626,6 +658,33 @@ object LocalWebServerManager {
                     val id = req.path.removePrefix("/api/warehouse/").toLongOrNull() ?: return badRequest()
                     repo.deleteWarehousePart(id)
                     jsonResponse(200, "OK", WebActionResult(true, "Warehouse spare part deleted"))
+                }
+
+                // --- Suppliers ---
+                req.method == "POST" && req.path == "/api/suppliers" -> {
+                    val body = decodeJson<WebSaveSupplierReq>(req.body) ?: return badRequest()
+                    val cleanName = body.companyName.trim()
+                    if (cleanName.isEmpty()) return badRequest()
+                    val existing = if (body.id != 0L) dao.getSupplierById(body.id) else null
+                    repo.saveSupplier(
+                        SupplierEntity(
+                            id = existing?.id ?: 0L,
+                            uuid = existing?.uuid ?: java.util.UUID.randomUUID().toString(),
+                            companyName = cleanName,
+                            supplierCode = body.supplierCode.trim().uppercase(),
+                            contactPerson = body.contactPerson.trim(),
+                            phone = body.phone.trim(),
+                            email = body.email.trim(),
+                            address = body.address.trim(),
+                            notes = body.notes.trim()
+                        )
+                    )
+                    jsonResponse(200, "OK", WebActionResult(true, "Supplier saved"))
+                }
+                req.method == "DELETE" && req.path.startsWith("/api/suppliers/") -> {
+                    val id = req.path.removePrefix("/api/suppliers/").toLongOrNull() ?: return badRequest()
+                    repo.deleteSupplier(id)
+                    jsonResponse(200, "OK", WebActionResult(true, "Supplier deleted"))
                 }
 
                 // --- Task History Logs (delete only; creation occurs automatically on Task Done / Reject) ---

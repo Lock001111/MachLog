@@ -7,14 +7,25 @@ object SampleDataSeeder {
     suspend fun seedIfNeeded(dao: MachinaDao, prefs: AppPreferences) {
         val snapshot = prefs.getSnapshot()
         if (snapshot.sampleDataSeeded) {
+            val now = System.currentTimeMillis()
             // Backfill sample warehouse parts catalog once for devices upgrading from v2 to v3
             if (dao.getAllWarehousePartsSync().isEmpty() &&
                 dao.getAllServiceLogsWithPartsSync().any { item -> item.parts.any { it.partCode == "AC-2901-1095" } }
             ) {
-                seedWarehouseCatalog(dao, System.currentTimeMillis())
+                val supplierIds = if (dao.getAllSuppliersSync().isEmpty()) {
+                    seedDefaultSuppliers(dao, now)
+                } else {
+                    dao.getAllSuppliersSync().associate { it.supplierCode to it.id }
+                }
+                seedWarehouseCatalog(dao, now, supplierIds)
+            } else if (dao.getAllSuppliersSync().isEmpty() &&
+                dao.getAllWarehousePartsSync().any { it.partCode == "AC-2901-1095" }
+            ) {
+                val supplierIds = seedDefaultSuppliers(dao, now)
+                backfillSamplePartSuppliers(dao, now, supplierIds)
             }
             if (dao.getAllEngineersSync().isEmpty()) {
-                seedDefaultEngineers(dao, System.currentTimeMillis())
+                seedDefaultEngineers(dao, now)
             }
             return
         }
@@ -595,11 +606,109 @@ object SampleDataSeeder {
             )
         )
 
-        // 6. Warehouse Spare Parts Catalog (Codes & Descriptions)
-        seedWarehouseCatalog(dao, now)
+        // 6. Suppliers & Warehouse Spare Parts Catalog (Codes, Descriptions & Supplier Pricing)
+        val supplierIds = seedDefaultSuppliers(dao, now)
+        seedWarehouseCatalog(dao, now, supplierIds)
     }
 
-    private suspend fun seedWarehouseCatalog(dao: MachinaDao, now: Long) {
+    private suspend fun seedDefaultSuppliers(dao: MachinaDao, now: Long): Map<String, Long> {
+        val defaults = listOf(
+            SupplierEntity(
+                companyName = "Apex Industrial Supply Co.",
+                supplierCode = "SUP-APX",
+                contactPerson = "Daniel Kim",
+                phone = "+1-555-0142",
+                email = "orders@apexindustrial.example",
+                address = "420 Precision Parkway, Suite B, Chicago, IL",
+                notes = "Primary bearing, seal, and compressor OEM parts distributor.",
+                updatedAtMillis = now
+            ),
+            SupplierEntity(
+                companyName = "Nordic Fluid & Hydraulics Ltd.",
+                supplierCode = "SUP-NFH",
+                contactPerson = "Hanna Lindstrom",
+                phone = "+1-555-0188",
+                email = "sales@nordichydraulics.example",
+                address = "88 Fluid Drive, Detroit, MI",
+                notes = "Hydraulic filters, ISO VG fluids, and CNC coolants.",
+                updatedAtMillis = now
+            ),
+            SupplierEntity(
+                companyName = "VoltMotion Controls & Automation",
+                supplierCode = "SUP-VMC",
+                contactPerson = "Rajesh Nair",
+                phone = "+1-555-0174",
+                email = "support@voltmotion.example",
+                address = "1500 Circuit Ave, San Jose, CA",
+                notes = "Safety relays, M12 sensors, thermocouples, and solenoid valves.",
+                updatedAtMillis = now
+            )
+        )
+        return defaults.associate { sup ->
+            sup.supplierCode to dao.insertSupplier(sup)
+        }
+    }
+
+    private suspend fun backfillSamplePartSuppliers(
+        dao: MachinaDao,
+        now: Long,
+        supplierIds: Map<String, Long>
+    ) {
+        val meta = samplePartSupplierMetadata(supplierIds)
+        dao.getAllWarehousePartsSync().forEach { part ->
+            val info = meta[part.partCode]
+            if (info != null && part.supplierId == null) {
+                dao.updateWarehousePart(
+                    part.copy(
+                        supplierId = info.supplierId,
+                        supplierPartSku = info.sku,
+                        unitPrice = info.price,
+                        currency = "USD",
+                        leadTimeDays = info.leadDays,
+                        updatedAtMillis = now
+                    )
+                )
+            }
+        }
+    }
+
+    private data class SamplePartSupplierInfo(
+        val supplierId: Long?,
+        val sku: String,
+        val price: Double,
+        val leadDays: Int
+    )
+
+    private fun samplePartSupplierMetadata(supplierIds: Map<String, Long>): Map<String, SamplePartSupplierInfo> {
+        val apx = supplierIds["SUP-APX"]
+        val nfh = supplierIds["SUP-NFH"]
+        val vmc = supplierIds["SUP-VMC"]
+        return mapOf(
+            "AC-2901-1095" to SamplePartSupplierInfo(apx, "APX-AC-1095", 148.50, 5),
+            "OR-VT-42" to SamplePartSupplierInfo(apx, "APX-OR-42VT", 6.80, 2),
+            "MV-PTFE-38" to SamplePartSupplierInfo(apx, "APX-PTFE-38", 24.00, 3),
+            "TC-K-120" to SamplePartSupplierInfo(vmc, "VMC-TC-K120", 39.50, 4),
+            "CL-SS-20L" to SamplePartSupplierInfo(nfh, "NFH-CL-20", 8.90, 2),
+            "HF-40-10UM" to SamplePartSupplierInfo(nfh, "NFH-HF40-10", 46.00, 3),
+            "OIL-VG46" to SamplePartSupplierInfo(nfh, "NFH-VG46-L", 5.40, 2),
+            "FN-GR-16KG" to SamplePartSupplierInfo(nfh, "NFH-FNGR-400", 32.00, 7),
+            "WL-CV-06" to SamplePartSupplierInfo(nfh, "NFH-WLCV-06", 18.75, 4),
+            "OIL-VG68" to SamplePartSupplierInfo(nfh, "NFH-VG68-L", 6.10, 2),
+            "BRG-6205-2RS" to SamplePartSupplierInfo(apx, "SKF-6205-2RS1", 19.25, 2),
+            "SOL-24DC-52" to SamplePartSupplierInfo(vmc, "VMC-SOL-5224", 94.00, 5),
+            "RLY-24DC-4P" to SamplePartSupplierInfo(vmc, "VMC-SFT-24D", 165.00, 6),
+            "SEN-IND-M12" to SamplePartSupplierInfo(vmc, "VMC-M12-PNP", 42.50, 3),
+            "BLT-HTD-8M" to SamplePartSupplierInfo(apx, "APX-HTD8M-1120", 54.00, 4),
+            "FUS-CC-10A" to SamplePartSupplierInfo(vmc, "VMC-FUS-10CC", 4.50, 1)
+        )
+    }
+
+    private suspend fun seedWarehouseCatalog(
+        dao: MachinaDao,
+        now: Long,
+        supplierIds: Map<String, Long> = emptyMap()
+    ) {
+        val meta = samplePartSupplierMetadata(supplierIds)
         val catalog = listOf(
             WarehousePartEntity(partCode = "AC-2901-1095", partName = "Thermostatic Valve Kit", partDescription = "65C oil cooler bypass cartridge & spring kit for GA-55 compressor", defaultUnit = "kit", updatedAtMillis = now),
             WarehousePartEntity(partCode = "OR-VT-42", partName = "Viton O-Ring Seal 42mm", partDescription = "High-temp fluoroelastomer 42x3mm housing seal ring", defaultUnit = "pcs", updatedAtMillis = now),
@@ -617,7 +726,18 @@ object SampleDataSeeder {
             WarehousePartEntity(partCode = "SEN-IND-M12", partName = "M12 Inductive Proximity Sensor", partDescription = "PNP NO flush 4mm sensing distance M12 4-pin quick disconnect", defaultUnit = "pcs", updatedAtMillis = now),
             WarehousePartEntity(partCode = "BLT-HTD-8M", partName = "HTD-8M Timing Belt 1120", partDescription = "Fiberglass-corded neoprene drive belt 30mm width", defaultUnit = "pcs", updatedAtMillis = now),
             WarehousePartEntity(partCode = "FUS-CC-10A", partName = "Control Fuse 10A 600V", partDescription = "Class CC time-delay ceramic cartridge fuse 10x38mm", defaultUnit = "pcs", updatedAtMillis = now)
-        )
+        ).map { p ->
+            val info = meta[p.partCode]
+            if (info != null) {
+                p.copy(
+                    supplierId = info.supplierId,
+                    supplierPartSku = info.sku,
+                    unitPrice = info.price,
+                    currency = "USD",
+                    leadTimeDays = info.leadDays
+                )
+            } else p
+        }
         catalog.forEach { dao.insertWarehousePart(it) }
     }
 }

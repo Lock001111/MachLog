@@ -391,6 +391,7 @@ fun TodoEditorDialog(
     machines: List<MachineEntity>,
     groups: List<CustomGroupEntity>,
     engineers: List<EngineerEntity>,
+    defaultDueAtMillis: Long? = null,
     onDismiss: () -> Unit,
     onSave: (
         id: Long,
@@ -421,7 +422,11 @@ fun TodoEditorDialog(
     var pic by remember { mutableStateOf(initialPic) }
     var repeatRule by remember { mutableStateOf(initialTodo?.repeatRule ?: RepeatRule.ONCE) }
     var dueAtMillis by remember {
-        mutableStateOf(initialTodo?.dueAtMillis ?: (System.currentTimeMillis() + TimeUnit.HOURS.toMillis(2)))
+        mutableStateOf(
+            initialTodo?.dueAtMillis
+                ?: defaultDueAtMillis
+                ?: (System.currentTimeMillis() + TimeUnit.HOURS.toMillis(2))
+        )
     }
     var reminderEnabled by remember { mutableStateOf(initialTodo?.reminderEnabled ?: true) }
     var priority by remember { mutableStateOf(initialTodo?.priority ?: ReminderPriority.NORMAL) }

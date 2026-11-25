@@ -23,6 +23,7 @@ class MaintenanceRepository(
     val todosFlow: Flow<List<TodoReminderEntity>> = dao.observeTodos()
     val serviceLogsFlow: Flow<List<ServiceLogWithParts>> = dao.observeServiceLogsWithParts()
     val warehousePartsFlow: Flow<List<WarehousePartEntity>> = dao.observeWarehouseParts()
+    val suppliersFlow: Flow<List<SupplierEntity>> = dao.observeSuppliers()
     val engineersFlow: Flow<List<EngineerEntity>> = dao.observeEngineers()
     val preferencesFlow: Flow<UserPreferences> = prefs.preferencesFlow
 
@@ -396,6 +397,10 @@ class MaintenanceRepository(
             partName = part.partName.trim(),
             partDescription = part.partDescription.trim(),
             defaultUnit = part.defaultUnit.trim().ifEmpty { "pcs" },
+            supplierPartSku = part.supplierPartSku.trim(),
+            unitPrice = part.unitPrice?.takeIf { it >= 0.0 },
+            currency = part.currency.trim().uppercase().ifEmpty { "USD" },
+            leadTimeDays = part.leadTimeDays?.takeIf { it >= 0 },
             updatedAtMillis = now
         )
         return if (part.id == 0L) {
@@ -408,6 +413,31 @@ class MaintenanceRepository(
 
     suspend fun deleteWarehousePart(partId: Long) {
         dao.deleteWarehousePartById(partId)
+    }
+
+    // --- Suppliers Directory ---
+    suspend fun saveSupplier(supplier: SupplierEntity): Long {
+        val now = System.currentTimeMillis()
+        val updated = supplier.copy(
+            companyName = supplier.companyName.trim(),
+            supplierCode = supplier.supplierCode.trim().uppercase(),
+            contactPerson = supplier.contactPerson.trim(),
+            phone = supplier.phone.trim(),
+            email = supplier.email.trim(),
+            address = supplier.address.trim(),
+            notes = supplier.notes.trim(),
+            updatedAtMillis = now
+        )
+        return if (supplier.id == 0L) {
+            dao.insertSupplier(updated)
+        } else {
+            dao.updateSupplier(updated)
+            supplier.id
+        }
+    }
+
+    suspend fun deleteSupplier(supplierId: Long) {
+        dao.deleteSupplierById(supplierId)
     }
 
     companion object {

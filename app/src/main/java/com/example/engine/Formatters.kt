@@ -52,4 +52,21 @@ object Formatters {
             if (safe == 1) "1 hour" else "$safe hours"
         }
     }
+
+    fun formatCurrencyPrice(price: Double?, currency: String = "USD"): String {
+        if (price == null || price.isNaN() || price.isInfinite()) return "-"
+        val cur = currency.trim().uppercase().ifEmpty { "USD" }
+        val symbol = when (cur) {
+            "USD" -> "$"
+            "EUR" -> "€"
+            "GBP" -> "£"
+            "JPY" -> "¥"
+            "IDR" -> "Rp "
+            "SGD" -> "S$"
+            "MYR" -> "RM "
+            else -> "$cur "
+        }
+        val decimals = if (cur == "JPY" || cur == "IDR") "%.0f" else "%.2f"
+        return symbol + String.format(Locale.US, decimals, price)
+    }
 }

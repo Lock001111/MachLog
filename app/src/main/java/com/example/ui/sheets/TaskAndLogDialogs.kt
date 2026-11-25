@@ -66,6 +66,7 @@ import com.example.data.MachineStatus
 import com.example.data.MaintenanceTaskEntity
 import com.example.data.ReminderPriority
 import com.example.data.SparePartDraft
+import com.example.data.SupplierEntity
 import com.example.data.WarehousePartEntity
 import com.example.data.formatEngineerList
 import com.example.data.parseEngineerList
@@ -87,6 +88,7 @@ fun TaskEditorDialog(
     machines: List<MachineEntity>,
     groups: List<CustomGroupEntity>,
     engineers: List<EngineerEntity>,
+    defaultDeadlineMillis: Long? = null,
     onDismiss: () -> Unit,
     onDelete: ((Long) -> Unit)? = null,
     onSave: (
@@ -119,7 +121,11 @@ fun TaskEditorDialog(
     var cadence by remember { mutableStateOf(initialTask?.cadence ?: Cadence.ONCE) }
     var priority by remember { mutableStateOf(initialTask?.priority ?: ReminderPriority.NORMAL) }
     var deadlineMillis by remember {
-        mutableStateOf(initialTask?.deadlineMillis ?: (System.currentTimeMillis() + TimeUnit.HOURS.toMillis(8)))
+        mutableStateOf(
+            initialTask?.deadlineMillis
+                ?: defaultDeadlineMillis
+                ?: (System.currentTimeMillis() + TimeUnit.HOURS.toMillis(8))
+        )
     }
     var estimatedMinutesText by remember { mutableStateOf((initialTask?.estimatedMinutes ?: 30).toString()) }
 
@@ -1322,6 +1328,7 @@ fun SearchableWarehousePartPickerDialog(
 @Composable
 fun WarehousePartEditorDialog(
     initialPart: WarehousePartEntity?,
+    suppliers: List<SupplierEntity> = emptyList(),
     onDismiss: () -> Unit,
     onSave: (
         id: Long,
@@ -1329,17 +1336,31 @@ fun WarehousePartEditorDialog(
         partCode: String,
         partName: String,
         partDescription: String,
-        defaultUnit: String
+        defaultUnit: String,
+        supplierId: Long?,
+        supplierPartSku: String,
+        unitPrice: Double?,
+        currency: String,
+        leadTimeDays: Int?
     ) -> Unit
 ) {
     var partCode by remember { mutableStateOf(initialPart?.partCode ?: "") }
     var partName by remember { mutableStateOf(initialPart?.partName ?: "") }
     var partDescription by remember { mutableStateOf(initialPart?.partDescription ?: "") }
     var defaultUnit by remember { mutableStateOf(initialPart?.defaultUnit ?: "pcs") }
+    var selectedSupplierId by remember { mutableStateOf(initialPart?.supplierId) }
+    var supplierPartSku by remember { mutableStateOf(initialPart?.supplierPartSku ?: "") }
+    var unitPriceText by remember { mutableStateOf(initialPart?.unitPrice?.toString() ?: "") }
+    var currency by remember { mutableStateOf(initialPart?.currency ?: "USD") }
+    var leadTimeText by remember { mutableStateOf(initialPart?.leadTimeDays?.toString() ?: "") }
+    var showSupplierMenu by remember { mutableStateOf(false) }
     var codeError by remember { mutableStateOf(false) }
     var descError by remember { mutableStateOf(false) }
 
     val commonUnits = remember { listOf("pcs", "kit", "liters", "meters", "tubes", "set") }
+    val selectedSupplier = remember(selectedSupplierId, suppliers) {
+        suppliers.find { it.id == selectedSupplierId }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1350,7 +1371,7 @@ fun WarehousePartEditorDialog(
             Column(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier
-                    .heightIn(max = 420.dp)
+                    .heightIn(max = 460.dp)
                     .verticalScroll(rememberScrollState())
             ) {
                 OutlinedTextField(
@@ -1416,6 +1437,94 @@ fun WarehousePartEditorDialog(
                         )
                     }
                 }
+
+                // Supplier & Unit Price Section
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { showSupplierMenu = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("warehouse_part_supplier_picker")
+                    ) {
+                        Text(
+                            text = "Supplier: ${selectedSupplier?.companyName ?: "None Assigned"}",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+                    }
+                    DropdownMenu(
+                        expanded = showSupplierMenu,
+                        onDismissRequest = { showSupplierMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("None Assigned") },
+                            onClick = {
+                                selectedSupplierId = null
+                                showSupplierMenu = false
+                            }
+                        )
+                        suppliers.forEach { sup ->
+                            DropdownMenuItem(
+                                text = {
+                                    val codePrefix = if (sup.supplierCode.isNotBlank()) "[${sup.supplierCode}] " else ""
+                                    Text("$codePrefix${sup.companyName}")
+                                },
+                                onClick = {
+                                    selectedSupplierId = sup.id
+                                    showSupplierMenu = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = unitPriceText,
+                        onValueChange = { raw ->
+                            unitPriceText = raw.filter { ch -> ch.isDigit() || ch == '.' }
+                        },
+                        label = { Text("Unit Price") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        modifier = Modifier
+                            .weight(1.2f)
+                            .testTag("warehouse_part_price_input")
+                    )
+                    OutlinedTextField(
+                        value = currency,
+                        onValueChange = { currency = it.take(5).uppercase() },
+                        label = { Text("Currency") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .weight(0.8f)
+                            .testTag("warehouse_part_currency_input")
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = supplierPartSku,
+                        onValueChange = { supplierPartSku = it },
+                        label = { Text("Supplier SKU") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .weight(1.2f)
+                            .testTag("warehouse_part_supplier_sku_input")
+                    )
+                    OutlinedTextField(
+                        value = leadTimeText,
+                        onValueChange = { raw -> leadTimeText = raw.filter { it.isDigit() } },
+                        label = { Text("Lead (days)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier
+                            .weight(0.8f)
+                            .testTag("warehouse_part_lead_days_input")
+                    )
+                }
             }
         },
         confirmButton = {
@@ -1434,7 +1543,12 @@ fun WarehousePartEditorDialog(
                         partCode.trim().uppercase(),
                         partName.trim(),
                         partDescription.trim().ifEmpty { partName.trim() },
-                        defaultUnit.trim().ifEmpty { "pcs" }
+                        defaultUnit.trim().ifEmpty { "pcs" },
+                        selectedSupplierId,
+                        supplierPartSku.trim(),
+                        unitPriceText.toDoubleOrNull(),
+                        currency.trim().uppercase().ifEmpty { "USD" },
+                        leadTimeText.toIntOrNull()
                     )
                 },
                 modifier = Modifier.testTag("save_warehouse_part_button")

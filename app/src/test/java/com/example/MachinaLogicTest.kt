@@ -29,10 +29,15 @@ import com.example.data.formatEngineerList
 import com.example.data.parseEngineerList
 import com.example.engine.AppUpdateChecker
 import com.example.engine.Formatters
+import com.example.engine.SupplierBackupDto
+import com.example.engine.WarehousePartBackupDto
 import com.example.ui.HistoryFilterState
 import com.example.ui.TodoFilterState
 import com.example.ui.TodoGroupBy
+import com.example.ui.components.CalendarItemFilter
+import com.example.ui.components.buildCalendarDayEntries
 import com.example.ui.components.filterMachinesByQuery
+import com.example.ui.components.localDayKey
 import com.example.ui.countApproachingOrOverdueTasks
 import com.example.ui.screens.COMPLETED_TODO_GROUP_TITLE
 import com.example.ui.screens.TodoFeedItem
@@ -921,6 +926,158 @@ class MachinaLogicTest {
         assertEquals("Lock001111/MachLog", AppUpdateChecker.normalizeRepoSlug("https://github.com/Lock001111/MachLog/"))
         assertEquals("Lock001111/MachLog", AppUpdateChecker.normalizeRepoSlug("https://github.com/Lock001111/MachLog.git"))
         assertEquals("Lock001111/MachLog", AppUpdateChecker.normalizeRepoSlug("invalid"))
+    }
+
+    @Test
+    fun `buildCalendarDayEntries groups tasks and todos by local day and respects filters`() {
+        val day1Morning = Calendar.getInstance().apply {
+            set(2026, Calendar.APRIL, 15, 8, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val day1Evening = Calendar.getInstance().apply {
+            set(2026, Calendar.APRIL, 15, 18, 30, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val day2Noon = Calendar.getInstance().apply {
+            set(2026, Calendar.APRIL, 16, 12, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+        val task1 = MaintenanceTaskEntity(
+            id = 1L,
+            machineId = 10L,
+            title = "Hydraulic Seal Inspection",
+            cadence = Cadence.WEEKLY,
+            deadlineMillis = day1Evening,
+            personInCharge = "Elena Vance"
+        )
+        val openTodo = TodoReminderEntity(
+            id = 2L,
+            title = "Order O-Ring Kit",
+            dueAtMillis = day1Morning,
+            isCompleted = false
+        )
+        val doneTodo = TodoReminderEntity(
+            id = 3L,
+            title = "Archive Inspection Sheet",
+            dueAtMillis = day2Noon,
+            isCompleted = true
+        )
+
+        val keyDay1 = localDayKey(day1Morning)
+        val keyDay2 = localDayKey(day2Noon)
+        assertEquals(20260415L, keyDay1)
+        assertEquals(20260416L, keyDay2)
+        assertEquals(keyDay1, localDayKey(day1Evening))
+
+        val allOpen = buildCalendarDayEntries(
+            tasks = listOf(task1),
+            todos = listOf(openTodo, doneTodo),
+            filter = CalendarItemFilter.ALL,
+            includeCompletedTodos = false
+        )
+        assertEquals(1, allOpen.size)
+        assertEquals(1, allOpen[keyDay1]?.tasks?.size)
+        assertEquals(1, allOpen[keyDay1]?.todos?.size)
+        assertEquals(2, allOpen[keyDay1]?.totalCount)
+        assertNull(allOpen[keyDay2])
+
+        val withDone = buildCalendarDayEntries(
+            tasks = listOf(task1),
+            todos = listOf(openTodo, doneTodo),
+            filter = CalendarItemFilter.ALL,
+            includeCompletedTodos = true
+        )
+        assertEquals(2, withDone.size)
+        assertEquals(1, withDone[keyDay2]?.todos?.size)
+
+        val tasksOnly = buildCalendarDayEntries(
+            tasks = listOf(task1),
+            todos = listOf(openTodo, doneTodo),
+            filter = CalendarItemFilter.TASKS,
+            includeCompletedTodos = true
+        )
+        assertEquals(1, tasksOnly.size)
+        assertEquals(1, tasksOnly[keyDay1]?.tasks?.size)
+        assertTrue(tasksOnly[keyDay1]?.todos.orEmpty().isEmpty())
+
+        val todosOnly = buildCalendarDayEntries(
+            tasks = listOf(task1),
+            todos = listOf(openTodo, doneTodo),
+            filter = CalendarItemFilter.TODOS,
+            includeCompletedTodos = false
+        )
+        assertEquals(1, todosOnly.size)
+        assertTrue(todosOnly[keyDay1]?.tasks.orEmpty().isEmpty())
+        assertEquals(1, todosOnly[keyDay1]?.todos?.size)
+    }
+
+    @Test
+    fun `formatCurrencyPrice formats supported currencies and invalid amounts safely`() {
+        assertEquals("-", Formatters.formatCurrencyPrice(null, "USD"))
+        assertEquals("-", Formatters.formatCurrencyPrice(Double.NaN, "USD"))
+        assertEquals("$42.50", Formatters.formatCurrencyPrice(42.5, "USD"))
+        assertEquals("€19.95", Formatters.formatCurrencyPrice(19.95, "eur"))
+        assertEquals("£100.00", Formatters.formatCurrencyPrice(100.0, "GBP"))
+        assertEquals("¥3500", Formatters.formatCurrencyPrice(3500.0, "JPY"))
+        assertEquals("Rp 250000", Formatters.formatCurrencyPrice(250000.0, "IDR"))
+        assertEquals("AUD 75.25", Formatters.formatCurrencyPrice(75.25, "AUD"))
+    }
+
+    @Test
+    fun `backup v3 serialization roundtrips suppliers and warehouse part supplier pricing`() {
+        val supplier = SupplierBackupDto(
+            uuid = "sup-uuid-1",
+            companyName = "Apex Bearings Ltd.",
+            supplierCode = "SUP-APX",
+            contactPerson = "Daniel Kim",
+            phone = "+1-555-0192",
+            email = "orders@apexbearings.example",
+            address = "410 Industrial Pkwy",
+            notes = "Next-day courier",
+            updatedAtMillis = 1_700_000_000_000L
+        )
+        val part = WarehousePartBackupDto(
+            uuid = "wp-uuid-1",
+            partCode = "BRG-6205-2RS",
+            partName = "Deep Groove Bearing",
+            partDescription = "Sealed 25x52x15mm bearing",
+            defaultUnit = "pcs",
+            supplierUuid = "sup-uuid-1",
+            supplierPartSku = "APX-6205-2RS",
+            unitPrice = 24.75,
+            currency = "USD",
+            leadTimeDays = 2,
+            updatedAtMillis = 1_700_000_000_000L
+        )
+        val pkg = PortableBackupPackage(
+            schemaVersion = 3,
+            exportedAtMillis = 1_700_000_000_000L,
+            deviceLabel = "MachinaLog Test",
+            groups = emptyList(),
+            machines = emptyList(),
+            tasks = emptyList(),
+            todos = emptyList(),
+            serviceLogs = emptyList(),
+            warehouseParts = listOf(part),
+            engineers = emptyList(),
+            suppliers = listOf(supplier)
+        )
+
+        val json = BackupSyncManager.encodeBackupJson(pkg)
+        val decoded = BackupSyncManager.parseBackupJson(json)
+        assertNotNull(decoded)
+        assertEquals(3, decoded?.schemaVersion)
+        assertEquals(1, decoded?.suppliers?.size)
+        assertEquals("Apex Bearings Ltd.", decoded?.suppliers?.firstOrNull()?.companyName)
+        assertEquals("SUP-APX", decoded?.suppliers?.firstOrNull()?.supplierCode)
+        assertEquals(1, decoded?.warehouseParts?.size)
+        val decodedPart = decoded?.warehouseParts?.firstOrNull()
+        assertEquals("sup-uuid-1", decodedPart?.supplierUuid)
+        assertEquals("APX-6205-2RS", decodedPart?.supplierPartSku)
+        assertEquals(24.75, decodedPart?.unitPrice ?: 0.0, 0.001)
+        assertEquals("USD", decodedPart?.currency)
+        assertEquals(2, decodedPart?.leadTimeDays)
     }
 }
 

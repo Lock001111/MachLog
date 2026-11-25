@@ -32,6 +32,19 @@ data class WebEngineerDto(
 )
 
 @JsonClass(generateAdapter = true)
+data class WebSupplierDto(
+    val id: Long,
+    val uuid: String,
+    val companyName: String,
+    val supplierCode: String,
+    val contactPerson: String,
+    val phone: String,
+    val email: String,
+    val address: String,
+    val notes: String
+)
+
+@JsonClass(generateAdapter = true)
 data class WebStateResponse(
     val nowMillis: Long,
     val defaultEngineerName: String,
@@ -43,6 +56,7 @@ data class WebStateResponse(
     val tasks: List<WebTaskDto>,
     val todos: List<WebTodoDto>,
     val warehouseParts: List<WebWarehousePartDto>,
+    val suppliers: List<WebSupplierDto> = emptyList(),
     val engineers: List<WebEngineerDto>,
     val serviceLogs: List<WebServiceLogDto>
 )
@@ -114,7 +128,12 @@ data class WebWarehousePartDto(
     val partCode: String,
     val partName: String,
     val partDescription: String,
-    val defaultUnit: String
+    val defaultUnit: String,
+    val supplierId: Long? = null,
+    val supplierPartSku: String = "",
+    val unitPrice: Double? = null,
+    val currency: String = "USD",
+    val leadTimeDays: Int? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -246,7 +265,24 @@ data class WebSaveWarehousePartReq(
     val partCode: String,
     val partName: String = "",
     val partDescription: String = "",
-    val defaultUnit: String = "pcs"
+    val defaultUnit: String = "pcs",
+    val supplierId: Long? = null,
+    val supplierPartSku: String = "",
+    val unitPrice: Double? = null,
+    val currency: String = "USD",
+    val leadTimeDays: Int? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class WebSaveSupplierReq(
+    val id: Long = 0,
+    val companyName: String,
+    val supplierCode: String = "",
+    val contactPerson: String = "",
+    val phone: String = "",
+    val email: String = "",
+    val address: String = "",
+    val notes: String = ""
 )
 
 @JsonClass(generateAdapter = true)
